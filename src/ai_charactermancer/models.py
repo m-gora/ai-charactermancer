@@ -21,3 +21,8 @@ class Plan(TypedDict):
     """
     The next agent that needs to be called in order to fulfill one of the steps.
     """
+
+    ask_human: bool
+    """
+    Whether the agent needs to ask the user for more information.
+    """

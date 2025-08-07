@@ -6,8 +6,11 @@ from langgraph.prebuilt import create_react_agent
 
 from models import State
 from agent_utils import get_file_contents
+from loguru import logger
 
-class_data = get_file_contents("agents/classes")
+class_data = get_file_contents("src/ai_charactermancer/agents/classes")
+logger.info(f"Loaded {len(class_data)} classes.")
+logger.info(f"Classes: {class_data}")
 
 @tool
 def list_class_tool():
@@ -20,6 +23,7 @@ def list_class_tool():
 def get_class_details(name: str):
     """
     Get the details of a class.
+    This includes the leveling progress, abilities, and other relevant information.
 
     args:
         name (str): The name of the class.
