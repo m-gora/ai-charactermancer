@@ -53,9 +53,14 @@ export function useSidekick({ draft, step }: UseSidekickOptions): UseSidekickRet
       try {
         const token = await getAccessTokenSilently();
 
+        // Snapshot completed turns (exclude the empty assistant placeholder)
+        const history = messages
+          .filter((m) => m.content)
+          .map((m) => ({ role: m.role, content: m.content }));
+
         const abort = apiStream(
           '/api/sidekick/chat',
-          { message: text.trim(), draft, step },
+          { message: text.trim(), draft, step, history },
           token,
           (chunk) => {
             setMessages((prev) =>

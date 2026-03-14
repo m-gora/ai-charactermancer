@@ -74,12 +74,16 @@ export function apiStream(
         const text = decoder.decode(value, { stream: true });
         for (const line of text.split('\n')) {
           if (line.startsWith('data: ')) {
-            const payload = line.slice(6).trim();
-            if (payload === '[DONE]') {
+            const payload = line.slice(6);
+            if (payload.trimEnd() === '[DONE]') {
               onDone();
               return;
             }
-            onChunk(payload);
+            try {
+              onChunk(JSON.parse(payload));
+            } catch {
+              onChunk(payload);
+            }
           }
         }
       }
@@ -131,6 +135,8 @@ export interface FeatData {
   id: string;
   name: string;
   summary: string;
+  description: string;
+  prerequisite_text: string;
   tags: string[];
   sub_type: string;
   prerequisite_names: string[];

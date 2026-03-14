@@ -122,6 +122,8 @@ class MongoLoader:
                 if ref.get("pack") == "feats"
             ]
             feat["prerequisite_names"] = prereq_names
+            # prerequisite_text is already set by the parser; ensure it's present
+            feat.setdefault("prerequisite_text", "")
         self._upsert_batch(COL_FEATS, feats)
 
     def load_classes(self, classes: list[dict]) -> None:

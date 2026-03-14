@@ -1,0 +1,145 @@
+# Local development stack
+#
+# All three app services use bind mounts so that changes to source files on
+# the host are reflected immediately inside the container — no rebuild needed:
+#
+#   backend  — uvicorn --reload  watches backend/src/**
+#   agent    — chainlit run --watch  watches agent/src/**
+#   frontend — Vite HMR           watches frontend/src/**
+#
+# node_modules is kept in an anonymous volume so the container's installed
+# packages are never overwritten by the (absent) host node_modules folder.
+#
+# Usage
+# -----
+#   1. cp backend/.env.example  backend/.env   # fill in AUTH0_* values
+#   2. cp agent/.env.example    agent/.env     # fill in GOOGLE_API_KEY etc.
+#   3. cp frontend/.env.example frontend/.env  # fill in VITE_AUTH0_* values
+#   4. docker compose up --build
+
+services:
+
+  # ── MongoDB (Atlas Local — includes Atlas Vector Search) ─────────────────
+  # mongodb/mongodb-atlas-local is a drop-in replacement for the community
+  # image that bundles mongot so $vectorSearch works out of the box.
+  mongo:
+    image: mongodb/mongodb-atlas-local:latest
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Character CRUD backend ─────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Override the baked-in CMD with --reload so uvicorn restarts on source changes
+    command: uvicorn character_backend.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    volumes:
+      # Mount source directly; edits on the host are visible instantly
+      - ./backend/src:/app/src
+    env_file:
+      - path: ./backend/.env
+        required: false
+    environment:
+      # Override the MONGODB_URI from .env to point at the compose mongo service
+      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_DB: "charactermancer"
+      CORS_ORIGINS: "http://localhost:5173"
+      PYTHONPATH: /app/src
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN}"
+      AUTH0_AUDIENCE: "${AUTH0_AUDIENCE}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # ── AI Sidekick Agent (FastAPI / uvicorn) ─────────────────────────────────
+  agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: uvicorn ai_charactermancer.main:app --host 0.0.0.0 --port 8080 --reload
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./agent/src:/app/src
+    env_file:
+      - path: ./agent/.env
+        required: false
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_DB: "charactermancer"
+      CORS_ORIGINS: "http://localhost:5173"
+      AUTH0_DOMAIN: "${AUTH0_DOMAIN}"
+      AUTH0_AUDIENCE: "${AUTH0_AUDIENCE}"
+      PYTHONPATH: /app/src
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  # ── Frontend (Vite dev server) ─────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Vite HMR works out-of-the-box; --host exposes it on 0.0.0.0 inside the container
+    command: bun run dev --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    volumes:
+      # Bind-mount the whole frontend directory for HMR
+      - ./frontend:/app
+      # Keep the container's node_modules; never let the host override it
+      - /app/node_modules
+    env_file:
+      - path: ./frontend/.env
+        required: false
+    environment:
+      BACKEND_URL: "http://backend:8000"
+      AGENT_URL: "http://agent:8080"
+    depends_on:
+      - backend
+      - agent
+
+  # ── Data ingestion (one-shot) ──────────────────────────────────────────────
+  # Run with:  docker compose run --rm ingest
+  # Options:   docker compose run --rm ingest --skip-embeddings
+  ingest:
+    build:
+      context: ./ingestion
+      dockerfile: Dockerfile
+    profiles:
+      - ingest
+    volumes:
+      - ./ingestion/src:/app/src
+      # Mount the cloned FoundryVTT repo as read-only data source
+      - ${FOUNDRY_DATA_PATH:-../foundryvtt-pathfinder1/packs}:/data/foundryvtt-pathfinder1/packs:ro
+      # Mount the pf1-content repo (traits, extra items, etc.)
+      - ${PF1_CONTENT_PATH:-../pf1-content/src}:/data/pf1-content/src:ro
+    env_file:
+      - path: ./ingestion/.env
+        required: false
+    environment:
+      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_DB: "charactermancer"
+      FOUNDRY_DATA_PATH: "/data/foundryvtt-pathfinder1/packs"
+      PF1_CONTENT_PATH: "/data/pf1-content/src"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY}"
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+volumes:
+  mongo_data:

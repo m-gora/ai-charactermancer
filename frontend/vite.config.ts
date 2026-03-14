@@ -7,6 +7,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      '/api/sidekick': {
+        target: process.env.AGENT_URL ?? 'http://localhost:8080',
+        changeOrigin: true,
+      },
       '/api': {
         target: process.env.BACKEND_URL ?? 'http://localhost:8000',
         changeOrigin: true,
