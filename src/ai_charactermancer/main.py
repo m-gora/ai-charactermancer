@@ -1,13 +1,15 @@
 from langgraph.graph import StateGraph, START, END
-from dotenv import load_dotenv
+from langgraph.checkpoint.memory import InMemorySaver
+from langchain_core.messages import HumanMessage
 
-from agents.classes import class_selector
-from agents.supervisor import character_builder
-from agents.attributes import attribute_selector
-from agents.feats import feat_selector
-from models import State
+from dotenv import load_dotenv
 from loguru import logger
-from langchain_core.messages import HumanMessage, ToolMessage
+
+from ai_charactermancer.agents.supervisor import character_builder
+from ai_charactermancer.agents.feats import feat_selector
+from ai_charactermancer.agents.attributes import attribute_selector
+from ai_charactermancer.tools import tools, should_use_tool
+from ai_charactermancer.models import State
 
 import sys
 
@@ -15,41 +17,41 @@ logger.add(sys.stdout, format="{time} {level} {message}", level="INFO", colorize
 
 load_dotenv()
 
-def human(state: State):
-    new_messages = []
-    if not isinstance(state["messages"][-1], ToolMessage):
-        # If there is no response from the human
-        new_messages.append(
-            ToolMessage(
-                content="No response from human.",
-                tool_call_id=state["messages"][-1].tool_calls[0]["id"],
-            )
-        )
-    return {
-        # Add new messages
-        "messages": new_messages,
-        # Reset the flag
-        "ask_human": False,
-    }
-
-
 graph_builder = StateGraph(State)
 
 graph_builder.add_node(character_builder)
-graph_builder.add_node(class_selector)
-graph_builder.add_node(attribute_selector)
 graph_builder.add_node(feat_selector)
-graph_builder.add_node(human)
+graph_builder.add_node(attribute_selector)
+graph_builder.add_node(tools)
 
 graph_builder.add_edge(START, "character_builder")
 graph_builder.add_edge("character_builder", END)
-network = graph_builder.compile(interrupt_before=["human"])
+graph_builder.add_conditional_edges(
+    "feat_selector", 
+    should_use_tool,
+    {"tools": "tools", END: END}
+)
+
+graph_builder.add_edge("tools", "feat_selector")
+network = graph_builder.compile(checkpointer=InMemorySaver())
 
 ###### GUI Setup ######
 
 import chainlit as cl
+from chainlit.input_widget import Switch
 from langchain_core.messages import HumanMessage
 from langchain_core.runnables import RunnableConfig
+
+@cl.on_chat_start
+async def on_app_startup():
+    await cl.ChatSettings([
+        Switch(id="feat_taxes_enabled", label="Enable Feat Taxes", initial=False, 
+               description="Enable or disable feat taxes.")
+    ]).send()
+
+@cl.on_settings_update
+async def on_settings_update(settings: cl.ChatSettings):
+    logger.info(f"Settings updated: {settings}")
 
 @cl.on_message
 async def on_message(message: cl.Message):
@@ -65,6 +67,7 @@ async def on_message(message: cl.Message):
         if (
             msg.content
             and not isinstance(msg, HumanMessage)
+            and metadata["langgraph_node"] == "feat_selector"
         ):
             await final_answer.stream_token(msg.content)
 

@@ -1,9 +1,8 @@
 from langchain_core.tools import tool
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.types import Command
-from langgraph.prebuilt import create_react_agent
 from models import State
-from agent_utils import get_file_contents
+from agent_utils import get_file_contents, get_llm
 from loguru import logger
 
 import requests
@@ -20,7 +19,9 @@ for edge_data in graph_json["edges"]:
 
 logger.info(f"Loaded graph with {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges.")
 
-files = get_file_contents("agents/feats")
+files = get_file_contents("src/ai_charactermancer/agents/feats")
+
+logger.info(f"loaded files: {list(files.keys())}")
 
 @tool
 def list_feats():
@@ -77,14 +78,6 @@ def get_dependent_feats(feat_name: str):
 #     """
 #     return {"message": "Path is valid"}
 
-@tool
-def feat_taxes():
-    """
-    If the player uses the feat taxes houserule, this tool helps identify the changes in the feat requirements.
-    """
-    return files["feats_list"]
-
-
 system_prompt = """
 You select the best feats for the character that needs to be created. Keep requirements in mind.
 You have access to the feats_graph tool, which returns a graph of all the feats and their requirements.
@@ -92,13 +85,23 @@ The player might use the feat taxes houserule for which you can use the feat_tax
 If a feat tax applies, make sure to name it in the response instead of the original feat.
 """
 
+tools = [
+    list_feats,
+    feat_details,
+    find_feats_by_keyword,
+    get_feat_prerequisites,
+    get_dependent_feats
+]
+
 def feat_selector(state: State):
-    llm = ChatGoogleGenerativeAI(
-        temperature=0,
-        model="gemini-1.5-flash"
-    )
-    agent = create_react_agent(model=llm, prompt=system_prompt, tools=[list_feats, feat_details, find_feats_by_keyword, get_feat_prerequisites, get_dependent_feats, feat_taxes])
-    response = agent.invoke(input=state)
+    llm = get_llm()
+    llm_with_tools = llm.bind_tools(tools)
+    template = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        MessagesPlaceholder(variable_name="messages"),
+    ])
+    agent = template | llm_with_tools
+    response = agent.invoke(input={"messages": state["messages"]})
     return Command(
         goto=["character_builder"],
         update={ "messages": [response] }

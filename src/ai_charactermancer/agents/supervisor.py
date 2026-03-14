@@ -1,35 +1,46 @@
-from langchain_google_genai import ChatGoogleGenerativeAI
-from langgraph.graph import END
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
+from langchain_core.output_parsers import StrOutputParser
 from langgraph.types import Command
-from models import State, Plan
-from langgraph.prebuilt import create_react_agent
+from typing import Annotated
+from loguru import logger
 
-import logging
+from ai_charactermancer.models import State
+from ai_charactermancer.agent_utils import get_llm
 
-logging.getLogger().setLevel(logging.INFO)
+@tool
+def attribute_selector(tool_call_id: Annotated[str, InjectedToolCallId]):
+    """
+    Handover to the Attribute Selector Agent.
+    """
+    return Command(
+        goto=["attribute_selector"],
+        update={"messages": [
+            ToolMessage(
+                content="Handover to the Attribute Selector Agent.",
+                tool_call_id=tool_call_id
+            )
+        ] }
+    )
+
+tools = [attribute_selector]
 
 def character_builder(state: State):
-    llm = ChatGoogleGenerativeAI(
-        temperature=0,
-        model="gemini-1.5-flash"
-    )
+    llm = get_llm()
+    llm_with_tools = llm.bind_tools(tools)
     system_prompt = """
     You are an assistant to create characters for the Pathfinder 1e roleplaying system.
     You will be given a set of requirements and you will create a character based on these requirements.
-    From these requirements create a plan and determine the next agent that needs to be called in order to fulfill one of the steps.
-
-    the agents known to you are:
-    - class_selector
-    - attribute_selector
-    - feat_selector
-    - spell_selector
-    - item_selector
+    Currently you only have access to the feat_selector agent, which helps you select the best feats for the character.
+    Work with the feat_selector agent to compile a suitable list of feats for the character.
     """
-    
-    agent = create_react_agent(model=llm, prompt=system_prompt, response_format=Plan, tools=[])
-    response = agent.invoke(input=state)
-    logging.info(response)
-    return Command(
-        goto=response["structured_response"]["next_agent"],
-        # update={ "messages": [response["task"]] }
-    )
+    prompt_template = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        MessagesPlaceholder(variable_name="messages"),
+    ])
+    agent = prompt_template | llm_with_tools | StrOutputParser
+    response = agent.invoke(input={"messages": state["messages"]})
+    logger.info(response)
+
+    return { "messages": [response] }

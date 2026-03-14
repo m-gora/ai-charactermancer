@@ -1,4 +1,6 @@
 from pathlib import Path
+from langchain_core.language_models import BaseLanguageModel
+from langchain_google_genai import ChatGoogleGenerativeAI
 
 def get_file_contents(directory: str):
     """
@@ -20,3 +22,9 @@ def read_from_file(file_path):
         print(f"Error: The file at {file_path} was not found.")
     except Exception as e:
         print(f"An error occurred: {e}")
+
+def get_llm() -> BaseLanguageModel:
+    return ChatGoogleGenerativeAI(
+        model="gemini-pro",
+        temperature=0.7
+    )
