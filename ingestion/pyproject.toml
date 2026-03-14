@@ -1,0 +1,27 @@
+[project]
+name = "pf1-ingestion"
+version = "0.1.0"
+description = "Data ingestion pipeline: FoundryVTT PF1e → Neo4j GraphRAG with Gemini embeddings"
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+    "lxml>=5.0",
+    "google-genai>=1.0",
+    "pymongo[srv]>=4.7",
+    "pydantic-settings>=2.0",
+    "loguru>=0.7",
+    "rich>=13.0",
+    "click>=8.1",
+    "tenacity>=8.2",
+]
+
+[project.scripts]
+pf1-ingest = "pf1_ingestion.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pf1_ingestion"]
