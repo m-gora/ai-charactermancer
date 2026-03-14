@@ -37,13 +37,11 @@ export interface CharacterDraft {
 
 interface CharacterStore {
   draft: CharacterDraft;
-  currentStep: number;
   dirty: boolean;
   /** Racial stat modifiers for the currently selected race (populated by RaceStep). */
   raceMods: Partial<Record<keyof Attributes, number>>;
   setDraft: (updates: Partial<CharacterDraft>) => void;
   setRaceMods: (mods: Partial<Record<keyof Attributes, number>>) => void;
-  setStep: (step: number) => void;
   setDirty: (dirty: boolean) => void;
   reset: () => void;
 }
@@ -69,7 +67,6 @@ const defaultDraft: CharacterDraft = {
 
 export const useCharacterStore = create<CharacterStore>((set) => ({
   draft: { ...defaultDraft, attributes: { ...DEFAULT_ATTRS } },
-  currentStep: 0,
   dirty: false,
   raceMods: {},
 
@@ -81,14 +78,11 @@ export const useCharacterStore = create<CharacterStore>((set) => ({
 
   setRaceMods: (mods) => set({ raceMods: mods }),
 
-  setStep: (step) => set({ currentStep: step }),
-
   setDirty: (dirty) => set({ dirty }),
 
   reset: () =>
     set({
       draft: { ...defaultDraft, attributes: { ...DEFAULT_ATTRS } },
-      currentStep: 0,
       dirty: false,
       raceMods: {},
     }),

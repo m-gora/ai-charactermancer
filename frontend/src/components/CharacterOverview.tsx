@@ -14,6 +14,7 @@ import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import EditIcon from '@mui/icons-material/Edit';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { apiFetch } from '../api/client';
 
 interface CharacterSummary {
@@ -25,17 +26,13 @@ interface CharacterSummary {
   status?: 'draft' | 'complete';
 }
 
-interface Props {
-  onNewCharacter: () => void;
-  onResumeCharacter: (id: string) => void;
-}
-
 /**
  * Post-login landing screen. Fetches saved characters and lets the user
  * resume an existing one or start a new wizard.
  */
-export function CharacterOverview({ onNewCharacter, onResumeCharacter }: Readonly<Props>) {
+export function CharacterOverview() {
   const { user, logout, getAccessTokenSilently } = useAuth0();
+  const navigate = useNavigate();
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +86,7 @@ export function CharacterOverview({ onNewCharacter, onResumeCharacter }: Readonl
       <Box sx={{ flex: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h5">Your Characters</Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={onNewCharacter}>
+          <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/characters/new/basic-info')}>
             New Character
           </Button>
         </Box>
@@ -115,7 +112,7 @@ export function CharacterOverview({ onNewCharacter, onResumeCharacter }: Readonl
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               Create your first Pathfinder 1e character using the guided wizard.
             </Typography>
-            <Button variant="contained" startIcon={<AddIcon />} onClick={onNewCharacter}>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={() => navigate('/characters/new/basic-info')}>
               Create Your First Character
             </Button>
           </Paper>
@@ -135,7 +132,7 @@ export function CharacterOverview({ onNewCharacter, onResumeCharacter }: Readonl
                   cursor: 'pointer',
                   '&:hover': { borderColor: 'primary.main' },
                 }}
-                onClick={() => onResumeCharacter(c.id)}
+                onClick={() => navigate(`/characters/${c.id}/basic-info`)}
               >
                 <AutoStoriesIcon sx={{ color: 'primary.main', fontSize: 36, flexShrink: 0 }} />
                 <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -155,7 +152,7 @@ export function CharacterOverview({ onNewCharacter, onResumeCharacter }: Readonl
                   variant="outlined"
                   size="small"
                   startIcon={<EditIcon />}
-                  onClick={(e) => { e.stopPropagation(); onResumeCharacter(c.id); }}
+                  onClick={(e) => { e.stopPropagation(); navigate(`/characters/${c.id}/basic-info`); }}
                 >
                   {c.status === 'complete' ? 'Open' : 'Continue'}
                 </Button>

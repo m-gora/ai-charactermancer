@@ -1,11 +1,9 @@
 import { Auth0Provider, useAuth0 } from '@auth0/auth0-react';
 import { ThemeProvider, CssBaseline, Box, Button, Typography, CircularProgress } from '@mui/material';
-import { useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { theme } from './theme/theme';
 import { WizardShell } from './components/wizard/WizardShell';
 import { CharacterOverview } from './components/CharacterOverview';
-import { useCharacterStore } from './store/characterStore';
-import { apiFetch } from './api/client';
 
 /** Shows a landing page when the user is not authenticated. */
 function Landing() {
@@ -34,11 +32,15 @@ function Landing() {
   );
 }
 
-/** Guards the wizard behind Auth0 authentication. */
+/** Redirects /characters/:id → /characters/:id/basic-info */
+function WizardStepRedirect() {
+  const { id } = useParams<{ id: string }>();
+  return <Navigate to={`/characters/${id ?? 'new'}/basic-info`} replace />;
+}
+
+/** Guards all app routes behind Auth0 authentication. */
 function AuthGate() {
-  const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
-  const { reset, setDraft, setStep } = useCharacterStore();
-  const [view, setView] = useState<'overview' | 'wizard'>('overview');
+  const { isAuthenticated, isLoading } = useAuth0();
 
   if (isLoading) {
     return (
@@ -50,31 +52,14 @@ function AuthGate() {
 
   if (!isAuthenticated) return <Landing />;
 
-  if (view === 'wizard') {
-    return <WizardShell onExit={() => setView('overview')} />;
-  }
-
-  const handleResume = async (id: string) => {
-    try {
-      const token = await getAccessTokenSilently();
-      const draft = await apiFetch<Record<string, unknown>>(`/api/characters/${id}`, { token });
-      reset();
-      setDraft(draft as Parameters<typeof setDraft>[0]);
-      setStep(0);
-      setView('wizard');
-    } catch {
-      // If fetch fails, fall through — user can still start a new character
-    }
-  };
-
   return (
-    <CharacterOverview
-      onNewCharacter={() => {
-        reset();
-        setView('wizard');
-      }}
-      onResumeCharacter={(id) => void handleResume(id)}
-    />
+    <Routes>
+      <Route path="/" element={<Navigate to="/characters" replace />} />
+      <Route path="/characters" element={<CharacterOverview />} />
+      <Route path="/characters/:id/:step" element={<WizardShell />} />
+      <Route path="/characters/:id" element={<WizardStepRedirect />} />
+      <Route path="*" element={<Navigate to="/characters" replace />} />
+    </Routes>
   );
 }
 
@@ -96,7 +81,9 @@ export function App() {
     >
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <AuthGate />
+        <BrowserRouter>
+          <AuthGate />
+        </BrowserRouter>
       </ThemeProvider>
     </Auth0Provider>
   );

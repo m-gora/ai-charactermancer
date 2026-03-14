@@ -6,8 +6,11 @@ import {
   Button,
   Typography,
   LinearProgress,
+  CircularProgress,
 } from '@mui/material';
-import { useState, type ComponentType } from 'react';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
+import { useState, useEffect, type ComponentType } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useCharacterStore } from '../../store/characterStore';
 import { STEPS } from './StepRegistry';
@@ -40,21 +43,78 @@ const LAST_STEP = STEPS.length - 1;
 /**
  * Renders the active wizard step with a progress stepper, navigation buttons,
  * autosave on step advance, and the collapsible AI sidekick panel.
+ *
+ * URL scheme: /characters/:id/:step
+ *   id   — character ID, or "new" before the first autosave assigns a real ID
+ *   step — step path from StepRegistry (e.g. "basic-info", "race", …)
  */
-export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
-  const { currentStep, setStep, draft, setDirty } = useCharacterStore();
+export function WizardShell() {
+  const { id, step } = useParams<{ id: string; step: string }>();
+  const navigate = useNavigate();
+  const { setDraft, draft, setDirty, reset } = useCharacterStore();
   const { getAccessTokenSilently } = useAuth0();
   const [validationError, setValidationError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [charLoading, setCharLoading] = useState(false);
 
-  const StepComponent = STEP_COMPONENTS[currentStep];
+  // Derive numeric step index from the URL :step param
+  const currentStep = STEPS.findIndex((s) => s.path === step);
   const stepMeta = STEPS[currentStep];
+  const StepComponent = STEP_COMPONENTS[currentStep];
 
-  // Guard: currentStep should always be in-bounds; bail if not.
+  // Load an existing character from the API, or reset the store for a new one
+  useEffect(() => {
+    if (!id || id === 'new') {
+      reset();
+      return;
+    }
+    // Already loaded — skip redundant fetch
+    if (draft.id === id) return;
+
+    setCharLoading(true);
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = await getAccessTokenSilently();
+        const loaded = await apiFetch<Record<string, unknown>>(`/api/characters/${id}`, { token });
+        if (!cancelled) {
+          reset();
+          setDraft(loaded as Parameters<typeof setDraft>[0]);
+        }
+      } catch {
+        if (!cancelled) navigate('/characters', { replace: true });
+      } finally {
+        if (!cancelled) setCharLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Redirect to first step when :step param is missing or unrecognised
+  useEffect(() => {
+    if (currentStep === -1 && id) {
+      navigate(`/characters/${id}/basic-info`, { replace: true });
+    }
+  }, [currentStep, id, navigate]);
+
+  if (charLoading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
+        <CircularProgress color="primary" />
+      </Box>
+    );
+  }
+
   if (!StepComponent || !stepMeta) return null;
 
   const isLastStep = currentStep === LAST_STEP;
   const isBeforeLastStep = currentStep === LAST_STEP - 1;
+  const charId = id ?? 'new';
+
+  const goToStep = (index: number, overrideId?: string) => {
+    const stepPath = STEPS[index]?.path ?? STEPS[0]!.path;
+    navigate(`/characters/${overrideId ?? charId}/${stepPath}`);
+  };
 
   const handleNext = async () => {
     setValidationError(null);
@@ -71,7 +131,7 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
       token = await getAccessTokenSilently();
     } catch {
       // No token — skip server-side validation but still advance
-      setStep(currentStep + 1);
+      goToStep(currentStep + 1);
       return;
     }
 
@@ -94,7 +154,10 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
       }
     }
 
-    // Autosave in background — never blocks wizard advancement
+    // Navigate immediately — autosave runs in background without blocking
+    const nextStepPath = STEPS[currentStep + 1]?.path ?? '';
+    goToStep(currentStep + 1);
+
     setSaving(true);
     (async () => {
       try {
@@ -105,24 +168,26 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
         });
         useCharacterStore.getState().setDraft({ id: saved.id });
         setDirty(false);
+        // If character had no ID yet, swap "new" for the real ID in the URL
+        if (charId === 'new') {
+          navigate(`/characters/${saved.id}/${nextStepPath}`, { replace: true });
+        }
       } catch {
         setDirty(true);
       } finally {
         setSaving(false);
       }
     })();
-
-    setStep(currentStep + 1);
   };
 
   const handleBack = () => {
     setValidationError(null);
-    setStep(currentStep - 1);
+    goToStep(currentStep - 1);
   };
 
   /**
-   * Final step: mark the character as complete, persist, then exit to the overview.
-   * Exits even if the save fails so the user is never stuck.
+   * Final step: mark the character as complete, persist, then return to overview.
+   * Navigates away even if the save fails so the user is never stuck.
    */
   const handleFinish = async () => {
     setSaving(true);
@@ -141,7 +206,7 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
     } finally {
       setSaving(false);
     }
-    onExit();
+    navigate('/characters');
   };
 
   return (
@@ -161,11 +226,21 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
           pr: { xs: 6, sm: 8 },
         }}
       >
+        {/* Back to character list */}
+        <Button
+          startIcon={<ArrowBackIcon />}
+          onClick={() => navigate('/characters')}
+          size="small"
+          sx={{ mb: 3 }}
+        >
+          All Characters
+        </Button>
+
         {/* Stepper */}
         <Stepper activeStep={currentStep} sx={{ mb: 5 }} alternativeLabel>
-          {STEPS.map((step, index) => (
-            <Step key={step.path} completed={index < currentStep}>
-              <StepLabel>{step.label}</StepLabel>
+          {STEPS.map((s, index) => (
+            <Step key={s.path} completed={index < currentStep}>
+              <StepLabel>{s.label}</StepLabel>
             </Step>
           ))}
         </Stepper>
@@ -195,7 +270,7 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
           <Box sx={{ display: 'flex', gap: 1 }}>
             {isLastStep && (
               <>
-                <Button variant="outlined" onClick={onExit}>
+                <Button variant="outlined" onClick={() => navigate('/characters')}>
                   Save as Draft
                 </Button>
                 <Button variant="contained" color="primary" onClick={() => void handleFinish()}>
