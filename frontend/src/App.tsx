@@ -5,6 +5,7 @@ import { theme } from './theme/theme';
 import { WizardShell } from './components/wizard/WizardShell';
 import { CharacterOverview } from './components/CharacterOverview';
 import { useCharacterStore } from './store/characterStore';
+import { apiFetch } from './api/client';
 
 /** Shows a landing page when the user is not authenticated. */
 function Landing() {
@@ -35,8 +36,8 @@ function Landing() {
 
 /** Guards the wizard behind Auth0 authentication. */
 function AuthGate() {
-  const { isAuthenticated, isLoading } = useAuth0();
-  const { reset } = useCharacterStore();
+  const { isAuthenticated, isLoading, getAccessTokenSilently } = useAuth0();
+  const { reset, setDraft, setStep } = useCharacterStore();
   const [view, setView] = useState<'overview' | 'wizard'>('overview');
 
   if (isLoading) {
@@ -53,12 +54,26 @@ function AuthGate() {
     return <WizardShell onExit={() => setView('overview')} />;
   }
 
+  const handleResume = async (id: string) => {
+    try {
+      const token = await getAccessTokenSilently();
+      const draft = await apiFetch<Record<string, unknown>>(`/api/characters/${id}`, { token });
+      reset();
+      setDraft(draft as Parameters<typeof setDraft>[0]);
+      setStep(0);
+      setView('wizard');
+    } catch {
+      // If fetch fails, fall through — user can still start a new character
+    }
+  };
+
   return (
     <CharacterOverview
       onNewCharacter={() => {
         reset();
         setView('wizard');
       }}
+      onResumeCharacter={(id) => void handleResume(id)}
     />
   );
 }
@@ -76,6 +91,8 @@ export function App() {
         redirect_uri: location.origin,
         ...(audience ? { audience } : {}),
       }}
+      cacheLocation="localstorage"
+      useRefreshTokens={true}
     >
       <ThemeProvider theme={theme}>
         <CssBaseline />
