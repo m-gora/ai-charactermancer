@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # Data
     foundry_data_path: str = "/data/foundryvtt-pathfinder1/packs"
+    pf1_content_path: str = "/data/pf1-content/src"
 
     # Packs to ingest (order matters for relationship resolution)
     enabled_packs: list[str] = [
@@ -26,6 +27,9 @@ class Settings(BaseSettings):
         "races",
         "spells",
         "class-abilities",
+        "traits",
+        "racial-traits",
+        "items",
     ]
 
 

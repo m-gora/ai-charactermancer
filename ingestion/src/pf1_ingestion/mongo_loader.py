@@ -16,6 +16,9 @@ COL_CLASSES = "classes"
 COL_RACES = "races"
 COL_SPELLS = "spells"
 COL_CLASS_ABILITIES = "class_abilities"
+COL_TRAITS = "traits"
+COL_RACIAL_TRAITS = "racial_traits"
+COL_ITEMS = "items"
 
 
 class MongoLoader:
@@ -36,7 +39,7 @@ class MongoLoader:
         """
         logger.info("Setting up MongoDB schema and indexes …")
 
-        collections = [COL_FEATS, COL_CLASSES, COL_RACES, COL_SPELLS, COL_CLASS_ABILITIES]
+        collections = [COL_FEATS, COL_CLASSES, COL_RACES, COL_SPELLS, COL_CLASS_ABILITIES, COL_TRAITS, COL_RACIAL_TRAITS, COL_ITEMS]
         for col_name in collections:
             col = self._db[col_name]
             # Unique index on Foundry ID
@@ -132,3 +135,12 @@ class MongoLoader:
 
     def load_class_abilities(self, abilities: list[dict]) -> None:
         self._upsert_batch(COL_CLASS_ABILITIES, abilities)
+
+    def load_traits(self, traits: list[dict]) -> None:
+        self._upsert_batch(COL_TRAITS, traits)
+
+    def load_racial_traits(self, racial_traits: list[dict]) -> None:
+        self._upsert_batch(COL_RACIAL_TRAITS, racial_traits)
+
+    def load_items(self, items: list[dict]) -> None:
+        self._upsert_batch(COL_ITEMS, items)

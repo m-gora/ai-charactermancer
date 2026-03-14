@@ -21,13 +21,18 @@ from .mongo_loader import MongoLoader
 from .parsers.class_abilities import scan_class_abilities
 from .parsers.classes import scan_classes
 from .parsers.feats import scan_feats
+from .parsers.items import scan_items
 from .parsers.races import scan_races
+from .parsers.racial_traits import scan_racial_traits
 from .parsers.spells import scan_spells
+from .parsers.traits import scan_traits
 
 console = Console()
 
 
-def _parse_all(data_root: Path, packs: list[str]) -> dict[str, list[dict]]:
+def _parse_all(
+    data_root: Path, content_root: Path, packs: list[str]
+) -> dict[str, list[dict]]:
     """Run all parsers and return a dict of {pack_name: [items]}."""
     result: dict[str, list[dict]] = {}
 
@@ -37,6 +42,9 @@ def _parse_all(data_root: Path, packs: list[str]) -> dict[str, list[dict]]:
         "races": lambda: scan_races(data_root / "races"),
         "spells": lambda: scan_spells(data_root / "spells"),
         "class-abilities": lambda: scan_class_abilities(data_root / "class-abilities"),
+        "traits": lambda: scan_traits(content_root / "pf-traits"),
+        "racial-traits": lambda: scan_racial_traits(content_root / "pf-racial-traits"),
+        "items": lambda: scan_items(data_root, content_root),
     }
 
     for pack in packs:
@@ -72,6 +80,9 @@ def _load_all(parsed: dict[str, list[dict]], loader: MongoLoader) -> None:
         "races": loader.load_races,
         "spells": loader.load_spells,
         "class-abilities": loader.load_class_abilities,
+        "traits": loader.load_traits,
+        "racial-traits": loader.load_racial_traits,
+        "items": loader.load_items,
     }
     for pack, items in parsed.items():
         if pack in loaders:
@@ -103,15 +114,20 @@ def cli(packs: tuple[str, ...], skip_embeddings: bool, data_path: str | None) ->
         console.print(f"[red]Data path not found: {data_root}[/red]")
         raise SystemExit(1)
 
+    content_root = Path(settings.pf1_content_path)
+    if not content_root.exists():
+        console.print(f"[yellow]pf1-content path not found: {content_root} — traits/items will be empty.[/yellow]")
+
     active_packs = list(packs) if packs else settings.enabled_packs
     console.print(f"[bold]Ingesting packs:[/bold] {', '.join(active_packs)}")
     console.print(f"[bold]Data path:[/bold] {data_root}")
+    console.print(f"[bold]Content path:[/bold] {content_root}")
     console.print(f"[bold]MongoDB:[/bold] {settings.mongodb_uri} / {settings.mongodb_db}")
 
     with Progress(SpinnerColumn(), *Progress.get_default_columns(), TimeElapsedColumn()) as progress:
         task = progress.add_task("Parsing …", total=None)
 
-        parsed = _parse_all(data_root, active_packs)
+        parsed = _parse_all(data_root, content_root, active_packs)
         total_items = sum(len(v) for v in parsed.values())
         progress.update(task, description=f"Parsed {total_items} items. Embedding …")
 
