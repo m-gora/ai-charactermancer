@@ -43,7 +43,11 @@ def parse_racial_trait(path: Path) -> dict | None:
     desc = system.get("description", {})
     desc_html = desc.get("value", "")
     summary = desc.get("summary", "") or ""
-    plain = strip_html(desc_html)
+
+    # The HTML structure is: <p>Race: Xxx<br/>Replaced Trait(s): Yyy</p><hr/><p>actual text…</p>
+    # Everything before (and including) the <hr> is header boilerplate — take what's after it.
+    hr_split = re.split(r"<hr\s*/?>", desc_html, maxsplit=1, flags=re.IGNORECASE)
+    plain = strip_html(hr_split[1] if len(hr_split) > 1 else desc_html).strip()
 
     replaces = _parse_replaces(desc_html)
     trait_category = system.get("traitCategory", "") or ""

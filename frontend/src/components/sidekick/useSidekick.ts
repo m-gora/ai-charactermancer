@@ -54,7 +54,7 @@ export function useSidekick({ draft, step }: UseSidekickOptions): UseSidekickRet
         const token = await getAccessTokenSilently();
 
         const abort = apiStream(
-          '/sidekick/chat',
+          '/api/sidekick/chat',
           { message: text.trim(), draft, step },
           token,
           (chunk) => {

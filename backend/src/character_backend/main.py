@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db.client import lifespan
 from .routers.characters import router as character_router
+from .routers.content import router as content_router
 
 app = FastAPI(
     title="AI Charactermancer — Character API",
@@ -23,6 +24,7 @@ app.add_middleware(
 )
 
 app.include_router(character_router)
+app.include_router(content_router)
 
 
 @app.get("/health", include_in_schema=False)

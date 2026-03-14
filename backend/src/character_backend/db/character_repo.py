@@ -11,7 +11,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 COLLECTION = "characters"
 
 # Fields returned for the list endpoint — avoids sending full drafts in bulk.
-_SUMMARY_PROJECTION = {"name": 1, "race": 1, "class": 1, "level": 1}
+_SUMMARY_PROJECTION = {"name": 1, "race": 1, "class": 1, "level": 1, "status": 1}
 
 
 def _parse_object_id(id_: str) -> ObjectId:

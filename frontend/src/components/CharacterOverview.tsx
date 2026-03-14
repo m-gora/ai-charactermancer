@@ -4,21 +4,55 @@ import {
   Button,
   Paper,
   Divider,
+  CircularProgress,
+  Alert,
+  Chip,
+  Stack,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
+import EditIcon from '@mui/icons-material/Edit';
 import { useAuth0 } from '@auth0/auth0-react';
+import { useEffect, useState } from 'react';
+import { apiFetch } from '../api/client';
+
+interface CharacterSummary {
+  id: string;
+  name?: string;
+  race?: string;
+  class?: string;
+  level: number;
+  status?: 'draft' | 'complete';
+}
 
 interface Props {
   onNewCharacter: () => void;
+  onResumeCharacter: (id: string) => void;
 }
 
 /**
- * Post-login landing screen. Shows saved characters (future) and a
- * "New Character" button to start the creation wizard.
+ * Post-login landing screen. Fetches saved characters and lets the user
+ * resume an existing one or start a new wizard.
  */
-export function CharacterOverview({ onNewCharacter }: Readonly<Props>) {
-  const { user, logout } = useAuth0();
+export function CharacterOverview({ onNewCharacter, onResumeCharacter }: Readonly<Props>) {
+  const { user, logout, getAccessTokenSilently } = useAuth0();
+  const [characters, setCharacters] = useState<CharacterSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const token = await getAccessTokenSilently();
+        const data = await apiFetch<CharacterSummary[]>('/api/characters', { token });
+        setCharacters(data);
+      } catch (err) {
+        setError((err as Error).message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [getAccessTokenSilently]);
 
   return (
     <Box
@@ -55,35 +89,80 @@ export function CharacterOverview({ onNewCharacter }: Readonly<Props>) {
       <Box sx={{ flex: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
           <Typography variant="h5">Your Characters</Typography>
-          <Button
-            variant="contained"
-            startIcon={<AddIcon />}
-            onClick={onNewCharacter}
-          >
+          <Button variant="contained" startIcon={<AddIcon />} onClick={onNewCharacter}>
             New Character
           </Button>
         </Box>
 
-        {/* Empty state */}
-        <Paper
-          variant="outlined"
-          sx={{
-            p: 6,
-            textAlign: 'center',
-            borderStyle: 'dashed',
-          }}
-        >
-          <AutoStoriesIcon sx={{ fontSize: 56, color: 'primary.main', opacity: 0.4, mb: 2 }} />
-          <Typography variant="h6" color="text.secondary" gutterBottom>
-            No characters yet
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-            Create your first Pathfinder 1e character using the guided wizard.
-          </Typography>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={onNewCharacter}>
-            Create Your First Character
-          </Button>
-        </Paper>
+        {loading && (
+          <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
+            <CircularProgress color="primary" />
+          </Box>
+        )}
+
+        {error && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            Could not load characters: {error}
+          </Alert>
+        )}
+
+        {!loading && !error && characters.length === 0 && (
+          <Paper variant="outlined" sx={{ p: 6, textAlign: 'center', borderStyle: 'dashed' }}>
+            <AutoStoriesIcon sx={{ fontSize: 56, color: 'primary.main', opacity: 0.4, mb: 2 }} />
+            <Typography variant="h6" color="text.secondary" gutterBottom>
+              No characters yet
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+              Create your first Pathfinder 1e character using the guided wizard.
+            </Typography>
+            <Button variant="contained" startIcon={<AddIcon />} onClick={onNewCharacter}>
+              Create Your First Character
+            </Button>
+          </Paper>
+        )}
+
+        {!loading && characters.length > 0 && (
+          <Stack spacing={2}>
+            {characters.map((c) => (
+              <Paper
+                key={c.id}
+                variant="outlined"
+                sx={{
+                  p: 2.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 2,
+                  cursor: 'pointer',
+                  '&:hover': { borderColor: 'primary.main' },
+                }}
+                onClick={() => onResumeCharacter(c.id)}
+              >
+                <AutoStoriesIcon sx={{ color: 'primary.main', fontSize: 36, flexShrink: 0 }} />
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="subtitle1" fontWeight={700} noWrap>
+                    {c.name ?? 'Unnamed character'}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 0.75, flexWrap: 'wrap', mt: 0.5 }}>
+                    {c.race  && <Chip label={c.race}  size="small" variant="outlined" />}
+                    {c.class && <Chip label={c.class} size="small" variant="outlined" />}
+                    <Chip label={`Level ${c.level}`} size="small" variant="outlined" />
+                    {c.status === 'draft' && (
+                      <Chip label="Draft" size="small" color="warning" variant="outlined" />
+                    )}
+                  </Box>
+                </Box>
+                <Button
+                  variant="outlined"
+                  size="small"
+                  startIcon={<EditIcon />}
+                  onClick={(e) => { e.stopPropagation(); onResumeCharacter(c.id); }}
+                >
+                  {c.status === 'complete' ? 'Open' : 'Continue'}
+                </Button>
+              </Paper>
+            ))}
+          </Stack>
+        )}
       </Box>
     </Box>
   );

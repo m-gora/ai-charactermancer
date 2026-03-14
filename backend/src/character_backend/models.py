@@ -50,8 +50,12 @@ class CharacterDraft(CamelModel):
     attributes: Attributes = Field(default_factory=Attributes)
     feats: list[str] = Field(default_factory=list)
     traits: list[str] = Field(default_factory=list)
+    racial_trait_overrides: list[str] = Field(default_factory=list)
     skills: dict[str, int] = Field(default_factory=dict)
     equipment: list[str] = Field(default_factory=list)
+
+    # Lifecycle — "draft" while building in the wizard, "complete" once saved from the summary step
+    status: str = "draft"
 
 
 class CharacterSummary(CamelModel):

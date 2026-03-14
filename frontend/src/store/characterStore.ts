@@ -12,6 +12,8 @@ export interface Attributes {
 export interface CharacterDraft {
   id?: string;
   ownerId?: string;
+  /** "draft" while the wizard is in-progress; "complete" after the final save. */
+  status?: 'draft' | 'complete';
   // basic info
   name?: string;
   age?: number;
@@ -27,6 +29,8 @@ export interface CharacterDraft {
   attributes: Attributes;
   feats: string[];
   traits: string[];
+  racialTraitOverrides: string[];  // selected alternative racial trait names
+  drawback?: string;
   skills: Record<string, number>;
   equipment: string[];
 }
@@ -35,7 +39,10 @@ interface CharacterStore {
   draft: CharacterDraft;
   currentStep: number;
   dirty: boolean;
+  /** Racial stat modifiers for the currently selected race (populated by RaceStep). */
+  raceMods: Partial<Record<keyof Attributes, number>>;
   setDraft: (updates: Partial<CharacterDraft>) => void;
+  setRaceMods: (mods: Partial<Record<keyof Attributes, number>>) => void;
   setStep: (step: number) => void;
   setDirty: (dirty: boolean) => void;
   reset: () => void;
@@ -55,6 +62,7 @@ const defaultDraft: CharacterDraft = {
   attributes: { ...DEFAULT_ATTRS },
   feats: [],
   traits: [],
+  racialTraitOverrides: [],
   skills: {},
   equipment: [],
 };
@@ -63,12 +71,15 @@ export const useCharacterStore = create<CharacterStore>((set) => ({
   draft: { ...defaultDraft, attributes: { ...DEFAULT_ATTRS } },
   currentStep: 0,
   dirty: false,
+  raceMods: {},
 
   setDraft: (updates) =>
     set((s) => ({
       draft: { ...s.draft, ...updates },
       dirty: true,
     })),
+
+  setRaceMods: (mods) => set({ raceMods: mods }),
 
   setStep: (step) => set({ currentStep: step }),
 
@@ -79,5 +90,6 @@ export const useCharacterStore = create<CharacterStore>((set) => ({
       draft: { ...defaultDraft, attributes: { ...DEFAULT_ATTRS } },
       currentStep: 0,
       dirty: false,
+      raceMods: {},
     }),
 }));

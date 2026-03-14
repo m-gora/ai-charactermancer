@@ -4,28 +4,30 @@ from pathlib import Path
 
 from .common import build_embed_text, extract_uuid_refs, iter_yaml_files, load_yaml, strip_html
 
-# Foundry item sub-type → display category tag
-_SUBTYPE_CATEGORY: dict[str, str] = {
-    "core": "core",
-    "featured": "featured",
-    "uncommon": "uncommon",
-    "advanced": "advanced",
-    "monstrous": "monstrous",
+# Paizo product code → short source book name shown in the UI
+_SOURCE_NAMES: dict[str, str] = {
+    "PZO1110": "Core Rulebook",
+    "PZO1112": "Bestiary 1",
+    "PZO1121": "Bestiary 2",
+    "PZO1133": "Bestiary 5",
+    "PZO1137": "Ultimate Wilderness",
+    "PZO1140": "Advanced Race Guide",
+    "PZO1141": "Planar Adventures",
+    "PZO9244": "Pathfinder Adventure Path",
+    "PZO9280": "Inner Sea Races",
+    "PZO9284": "Blood of the Moon",
+    "PZO9482": "Aquatic Adventures",
+    "PZO90111": "Strange Aeons",
 }
 
 
 def _source_category(raw: dict) -> str:
-    """Derive a display category from the Foundry source/subtype fields."""
-    system = raw.get("system", {})
-    subtype = (system.get("subtype") or "").lower()
-    if subtype in _SUBTYPE_CATEGORY:
-        return _SUBTYPE_CATEGORY[subtype]
-    # Fall back to the source book abbreviation if present
-    source = (system.get("source") or "").upper()
-    for book in ("ARG", "B1", "B2", "B3", "B4", "B5"):
-        if book in source:
-            return "monstrous" if book.startswith("B") else "advanced"
-    return "core"
+    """Return the source book name for the first recognised source ID."""
+    for src in raw.get("system", {}).get("sources", []):
+        name = _SOURCE_NAMES.get(src.get("id", ""))
+        if name:
+            return name
+    return "Other"
 
 
 def _racial_abilities(raw: dict) -> list[dict]:

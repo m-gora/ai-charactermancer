@@ -28,12 +28,6 @@ function modifier(score: number): string {
   return mod >= 0 ? `+${mod}` : `${mod}`;
 }
 
-function totalPointsSpent(attrs: Attributes): number {
-  return (Object.keys(POINT_COST) as unknown as number[]).reduce((sum, _) => sum, 0) &&
-    (Object.values(attrs) as number[]).reduce((sum, score) => sum + (POINT_COST[score] ?? 0), 0);
-}
-
-// Re-export a correct helper (the reduce above was written wrong, let's do it simply):
 function calcPointsSpent(attrs: Attributes): number {
   return (Object.values(attrs) as number[]).reduce(
     (sum, score) => sum + (POINT_COST[score] ?? 0),
@@ -41,32 +35,20 @@ function calcPointsSpent(attrs: Attributes): number {
   );
 }
 
-// Remove unused export
 function getBudgetColour(rem: number): string {
   if (rem < 0) return 'error.main';
   if (rem === 0) return 'success.main';
   return 'primary.main';
 }
 
-/** Fixed racial modifiers per race (dynamic races stored in humanBonusAttr). */
-const RACIAL_MODS: Partial<Record<string, Partial<Record<AttrKey, number>>>> = {
-  Elf:      { dex: 2, int: 2, con: -2 },
-  Dwarf:    { con: 2, wis: 2, cha: -2 },
-  Gnome:    { con: 2, cha: 2, str: -2 },
-  Halfling: { dex: 2, cha: 2, str: -2 },
-};
-
 export function AttributesStep() {
-  const { draft, setDraft } = useCharacterStore();
+  // raceMods is set by RaceStep whenever the race or flex bonus changes
+  const { draft, setDraft, raceMods } = useCharacterStore();
   const attrs = draft.attributes;
   const spent = calcPointsSpent(attrs);
   const remaining = POINT_BUDGET - spent;
 
-  // Build a per-attribute racial modifier map
-  const racialMod: Partial<Record<AttrKey, number>> = {
-    ...(RACIAL_MODS[draft.race ?? ''] ?? {}),
-    ...(draft.humanBonusAttr ? { [draft.humanBonusAttr]: 2 } : {}),
-  };
+  const racialMod: Partial<Record<AttrKey, number>> = raceMods;
 
   const adjustScore = (key: AttrKey, delta: number) => {
     const current = attrs[key];

@@ -1,4 +1,4 @@
-const API_BASE = '/api';
+const API_BASE = '';
 
 /**
  * Typed fetch helper. Attaches an Auth0 Bearer token when provided.
@@ -93,3 +93,119 @@ export function apiStream(
 
   return () => controller.abort();
 }
+
+// ---------------------------------------------------------------------------
+// Game content (public reference data — no auth token needed)
+// ---------------------------------------------------------------------------
+
+export interface RaceData {
+  id: string;
+  name: string;
+  summary: string;
+  source_category: string;
+  stat_modifiers: Record<string, number>;
+  creature_types: string[];
+  creature_subtypes: string[];
+  racial_abilities: { name: string; summary: string; type: string }[];
+}
+
+export interface ClassData {
+  id: string;
+  name: string;
+  summary: string;
+  source_category: string;
+  bab: string;
+  hd: number;
+  class_skills: string[];
+}
+
+export interface ClassAbilityData {
+  id: string;
+  name: string;
+  summary: string;
+  ability_type: string;
+  associated_classes: string[];
+}
+
+export interface FeatData {
+  id: string;
+  name: string;
+  summary: string;
+  tags: string[];
+  sub_type: string;
+  prerequisite_names: string[];
+}
+
+export function fetchRaces(category?: string): Promise<RaceData[]> {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : '';
+  return apiFetch<RaceData[]>(`/api/races${qs}`);
+}
+
+export function fetchClasses(category?: string): Promise<ClassData[]> {
+  const qs = category ? `?category=${encodeURIComponent(category)}` : '';
+  return apiFetch<ClassData[]>(`/api/classes${qs}`);
+}
+
+export function fetchFeats(subType?: string): Promise<FeatData[]> {
+  const qs = subType ? `?sub_type=${encodeURIComponent(subType)}` : '';
+  return apiFetch<FeatData[]>(`/api/feats${qs}`);
+}
+
+export function fetchClassAbilities(className?: string): Promise<ClassAbilityData[]> {
+  const qs = className ? `?class_name=${encodeURIComponent(className)}` : '';
+  return apiFetch<ClassAbilityData[]>(`/api/class-abilities${qs}`);
+}
+
+export interface TraitData {
+  id: string;
+  name: string;
+  summary: string;
+  description: string;
+  trait_type: string;
+  tags: string[];
+}
+
+export interface ItemData {
+  id: string;
+  name: string;
+  description: string;
+  item_type: string;
+  sub_type: string;
+  weapon_subtype?: string;
+  price: number | null;
+  weight: number | null;
+}
+
+export function fetchTraits(traitType?: string): Promise<TraitData[]> {
+  const qs = traitType ? `?trait_type=${encodeURIComponent(traitType)}` : '';
+  return apiFetch<TraitData[]>(`/api/traits${qs}`);
+}
+
+export interface RacialTraitData {
+  id: string;
+  name: string;
+  summary: string;
+  description: string;
+  races: string[];
+  trait_category: string;
+  /** Names of the standard racial traits this alternative replaces (empty = standard trait). */
+  replaces: string[];
+  race_points: number;
+}
+
+export function fetchRacialTraits(race?: string, altOnly?: boolean): Promise<RacialTraitData[]> {
+  const params = new URLSearchParams();
+  if (race) params.set('race', race);
+  if (altOnly) params.set('alt_only', 'true');
+  const qs = params.toString() ? `?${params}` : '';
+  return apiFetch<RacialTraitData[]>(`/api/racial-traits${qs}`);
+}
+
+export function fetchItems(itemType?: string, subType?: string): Promise<ItemData[]> {
+  const params = new URLSearchParams();
+  if (itemType) params.set('item_type', itemType);
+  if (subType) params.set('sub_type', subType);
+  const qs = params.toString() ? `?${params}` : '';
+  return apiFetch<ItemData[]>(`/api/items${qs}`);
+}
+

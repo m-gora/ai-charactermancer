@@ -78,7 +78,7 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
     // Step validation (non-fatal network errors still allow advancing)
     if (!isLastStep) {
       try {
-        await apiFetch('/character/validate-step', {
+        await apiFetch('/api/characters/validate-step', {
           method: 'POST',
           body: JSON.stringify({ step: stepMeta.path, draft }),
           token,
@@ -98,7 +98,7 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
     setSaving(true);
     (async () => {
       try {
-        const saved = await apiFetch<{ id: string }>('/character/save', {
+        const saved = await apiFetch<{ id: string }>('/api/characters/save', {
           method: 'POST',
           body: JSON.stringify(draft),
           token,
@@ -118,6 +118,30 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
   const handleBack = () => {
     setValidationError(null);
     setStep(currentStep - 1);
+  };
+
+  /**
+   * Final step: mark the character as complete, persist, then exit to the overview.
+   * Exits even if the save fails so the user is never stuck.
+   */
+  const handleFinish = async () => {
+    setSaving(true);
+    try {
+      const token = await getAccessTokenSilently();
+      const finalDraft = { ...draft, status: 'complete' as const };
+      const saved = await apiFetch<{ id: string }>('/api/characters/save', {
+        method: 'POST',
+        body: JSON.stringify(finalDraft),
+        token,
+      });
+      useCharacterStore.getState().setDraft({ id: saved.id, status: 'complete' });
+      setDirty(false);
+    } catch {
+      // Save failed — still exit; the draft is preserved from autosave
+    } finally {
+      setSaving(false);
+    }
+    onExit();
   };
 
   return (
@@ -170,9 +194,14 @@ export function WizardShell({ onExit }: Readonly<{ onExit: () => void }>) {
 
           <Box sx={{ display: 'flex', gap: 1 }}>
             {isLastStep && (
-              <Button variant="outlined" onClick={onExit}>
-                Back to Overview
-              </Button>
+              <>
+                <Button variant="outlined" onClick={onExit}>
+                  Save as Draft
+                </Button>
+                <Button variant="contained" color="primary" onClick={() => void handleFinish()}>
+                  Save & Finish
+                </Button>
+              </>
             )}
             {!isLastStep && (
               <Button variant="contained" onClick={() => void handleNext()}>
