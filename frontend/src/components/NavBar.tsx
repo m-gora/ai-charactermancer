@@ -1,6 +1,7 @@
 import { AppBar, Toolbar, Typography, Button, Box, Avatar, Tooltip } from '@mui/material';
 import AutoStoriesIcon from '@mui/icons-material/AutoStories';
 import LogoutIcon from '@mui/icons-material/Logout';
+import AccountTreeIcon from '@mui/icons-material/AccountTree';
 import { useAuth0 } from '@auth0/auth0-react';
 import { useNavigate, useMatch } from 'react-router-dom';
 
@@ -8,6 +9,7 @@ export function NavBar() {
   const { user, logout } = useAuth0();
   const navigate = useNavigate();
   const onCharacters = useMatch('/characters');
+  const onFeats = useMatch('/feats');
 
   return (
     <AppBar
@@ -41,6 +43,15 @@ export function NavBar() {
           sx={{ fontFamily: 'inherit', textTransform: 'none', fontSize: '0.95rem' }}
         >
           Characters
+        </Button>
+
+        <Button
+          color={onFeats ? 'primary' : 'inherit'}
+          startIcon={<AccountTreeIcon fontSize="small" />}
+          onClick={() => navigate('/feats')}
+          sx={{ fontFamily: 'inherit', textTransform: 'none', fontSize: '0.95rem' }}
+        >
+          Feats
         </Button>
 
         <Box sx={{ flex: 1 }} />

@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-
 import { theme } from './theme/theme';
 import { WizardShell } from './pages/wizard/WizardShell';
 import { CharacterOverview } from './pages/CharacterOverview';
+import { FeatBrowser } from './pages/FeatBrowser';
 import { NavBar } from './components/NavBar';
 
 /** Shows a landing page when the user is not authenticated. */
@@ -61,8 +62,7 @@ function AuthGate() {
           <Route path="/" element={<Navigate to="/characters" replace />} />
           <Route path="/characters" element={<CharacterOverview />} />
           <Route path="/characters/:id/:step" element={<WizardShell />} />
-          <Route path="/characters/:id" element={<WizardStepRedirect />} />
-          <Route path="*" element={<Navigate to="/characters" replace />} />
+          <Route path="/characters/:id" element={<WizardStepRedirect />} />          <Route path="/feats" element={<FeatBrowser />} />          <Route path="*" element={<Navigate to="/characters" replace />} />
         </Routes>
       </Box>
     </Box>

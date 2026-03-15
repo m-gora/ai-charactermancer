@@ -104,15 +104,15 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     restart: unless-stopped
-    # Vite HMR works out-of-the-box; --host exposes it on 0.0.0.0 inside the container
-    command: bun run dev --host 0.0.0.0
+    # bun install syncs node_modules volume to the current lockfile before starting Vite
+    command: sh -c "bun install && bun run dev --host 0.0.0.0"
     ports:
       - "5173:5173"
     volumes:
       # Bind-mount the whole frontend directory for HMR
       - ./frontend:/app
       # Named volume keeps container's node_modules separate from the host bind-mount.
-      # If packages change, remove it with: docker volume rm ai-charactermancer_frontend_nm
+      # bun install at startup keeps it in sync — no manual volume removal needed.
       - frontend_nm:/app/node_modules
     env_file:
       - path: ./frontend/.env
