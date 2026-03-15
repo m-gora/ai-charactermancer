@@ -5,7 +5,7 @@ import {
 } from '@mui/material';
 import DownloadIcon from '@mui/icons-material/Download';
 import { useCharacterStore } from '../../../store/characterStore';
-import { CharacterSheet } from '../../character/CharacterSheet';
+import { CharacterSheet } from '../../../components/character/CharacterSheet';
 
 export function SummaryStep() {
   const { draft } = useCharacterStore();

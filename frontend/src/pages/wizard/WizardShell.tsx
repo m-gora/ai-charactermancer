@@ -3,12 +3,12 @@ import {
   Stepper,
   Step,
   StepLabel,
+  StepButton,
   Button,
   Typography,
   LinearProgress,
   CircularProgress,
 } from '@mui/material';
-import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { useState, useEffect, type ComponentType } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth0 } from '@auth0/auth0-react';
@@ -23,7 +23,7 @@ import { BasicInfoStep } from './steps/BasicInfoStep';
 import { TraitsStep } from './steps/TraitsStep';
 import { SkillsStep } from './steps/SkillsStep';
 import { EquipmentStep } from './steps/EquipmentStep';
-import { SidekickPanel } from '../sidekick/SidekickPanel';
+import { SidekickPanel } from '../../components/sidekick/SidekickPanel';
 import { apiFetch } from '../../api/client';
 
 const STEP_COMPONENTS: ComponentType[] = [
@@ -226,21 +226,13 @@ export function WizardShell() {
           pr: { xs: 6, sm: 8 },
         }}
       >
-        {/* Back to character list */}
-        <Button
-          startIcon={<ArrowBackIcon />}
-          onClick={() => navigate('/characters')}
-          size="small"
-          sx={{ mb: 3 }}
-        >
-          All Characters
-        </Button>
-
         {/* Stepper */}
-        <Stepper activeStep={currentStep} sx={{ mb: 5 }} alternativeLabel>
+        <Stepper activeStep={currentStep} sx={{ mb: 5 }} alternativeLabel nonLinear>
           {STEPS.map((s, index) => (
             <Step key={s.path} completed={index < currentStep}>
-              <StepLabel>{s.label}</StepLabel>
+              <StepButton onClick={() => { setValidationError(null); goToStep(index); }}>
+                {s.label}
+              </StepButton>
             </Step>
           ))}
         </Stepper>

@@ -20,7 +20,7 @@ import { themedCatalog } from './a2uiCatalog';
 import { ChatMessage } from './ChatMessage';
 import { useSidekick } from './useSidekick';
 import { useCharacterStore, type CharacterDraft } from '../../store/characterStore';
-import { type StepMeta } from '../wizard/StepRegistry';
+import { type StepMeta } from '../../pages/wizard/StepRegistry';
 
 interface Props {
   currentStep: StepMeta;
