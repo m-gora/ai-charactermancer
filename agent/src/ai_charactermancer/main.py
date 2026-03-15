@@ -108,7 +108,7 @@ async def _stream_response(
         retrieved_docs=[],
         validated_docs=[],
         response_text="",
-        actions=[],
+        a2ui_messages=[],
     )
 
     graph = get_graph()
@@ -134,13 +134,13 @@ async def _stream_response(
             if text:
                 yield f"data: {json.dumps(text)}\n\n"
 
-        # When the ui node finishes, emit actions as a typed SSE event.
+        # When the ui node finishes, emit A2UI messages as a typed SSE event.
         elif kind == "on_chain_end" and event.get("name") == "ui" and not actions_emitted:
             actions_emitted = True
             output: dict = event["data"].get("output", {})
-            actions = output.get("actions", [])
-            if actions:
-                yield f"event: actions\ndata: {json.dumps(actions)}\n\n"
+            a2ui_messages = output.get("a2ui_messages", [])
+            if a2ui_messages:
+                yield f"event: a2ui\ndata: {json.dumps(a2ui_messages)}\n\n"
 
     yield "data: [DONE]\n\n"
 

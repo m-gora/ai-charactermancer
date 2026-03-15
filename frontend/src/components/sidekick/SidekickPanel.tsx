@@ -14,9 +14,12 @@ import SendIcon from '@mui/icons-material/Send';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { useState, useRef, useEffect, type KeyboardEvent } from 'react';
+import { A2UIProvider, A2UIRenderer } from '@a2ui-sdk/react/0.8';
+import type { A2UIMessage, A2UIAction } from '@a2ui-sdk/react/0.8';
+import { themedCatalog } from './a2uiCatalog';
 import { ChatMessage } from './ChatMessage';
 import { useSidekick } from './useSidekick';
-import { useCharacterStore } from '../../store/characterStore';
+import { useCharacterStore, type CharacterDraft } from '../../store/characterStore';
 import { type StepMeta } from '../wizard/StepRegistry';
 
 interface Props {
@@ -27,14 +30,16 @@ const PANEL_WIDTH = 360;
 
 /**
  * Collapsible AI sidekick chat panel attached to the right edge of the viewport.
+ * The chat area streams narrative text; the A2UI surface below renders the
+ * agent's recommended action buttons via @a2ui-sdk/react.
  */
 export function SidekickPanel({ currentStep }: Readonly<Props>) {
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const { draft } = useCharacterStore();
+  const { draft, setDraft } = useCharacterStore();
 
-  const { messages, streaming, error, sendMessage, clearError } = useSidekick({
+  const { messages, a2uiMessages, streaming, error, sendMessage, clearError } = useSidekick({
     draft,
     step: currentStep.path,
   });
@@ -45,6 +50,23 @@ export function SidekickPanel({ currentStep }: Readonly<Props>) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, open]);
+
+  // Map A2UI action payload ("field:item") back to the character draft
+  const handleA2UIAction = (action: A2UIAction) => {
+    const encoded = action.name;
+    const colonIdx = encoded.indexOf(':');
+    if (colonIdx === -1) return;
+    const field = encoded.slice(0, colonIdx);
+    const value = encoded.slice(colonIdx + 1);
+    if (field === 'race' || field === 'class') {
+      setDraft({ [field]: value } as Partial<CharacterDraft>);
+    } else {
+      const current = (draft[field as keyof CharacterDraft] as string[] | undefined) ?? [];
+      if (!current.includes(value)) {
+        setDraft({ [field]: [...current, value] } as Partial<CharacterDraft>);
+      }
+    }
+  };
 
   const handleSend = () => {
     sendMessage(input);
@@ -178,6 +200,18 @@ export function SidekickPanel({ currentStep }: Readonly<Props>) {
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, px: 1 }}>
                 <CircularProgress size={14} color="primary" />
                 <Typography variant="caption" color="text.secondary">Thinking…</Typography>
+              </Box>
+            )}
+
+            {/* A2UI recommendations — inline after the last reply */}
+            {a2uiMessages.length > 0 && !streaming && (
+              <Box sx={{ mt: 1, mb: 1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ px: 0.5, mb: 0.5, display: 'block' }}>
+                  Recommendations
+                </Typography>
+                <A2UIProvider messages={a2uiMessages as A2UIMessage[]} catalog={themedCatalog}>
+                  <A2UIRenderer onAction={handleA2UIAction} />
+                </A2UIProvider>
               </Box>
             )}
 

@@ -33,19 +33,11 @@ export async function apiFetch<T>(
 /**
  * Opens an SSE stream to `path` (POST with JSON body + Bearer token).
  * Calls `onChunk` for each text `data:` line, `onEvent` for typed events
- * (e.g. `event: actions`), `onDone` when the stream closes, and `onError`
+ * (e.g. `event: a2ui`), `onDone` when the stream closes, and `onError`
  * on any non-abort error.
  *
  * Returns an abort function that cancels the stream.
  */
-export interface ActionItem {
-  type: string;        // "add_feat" | "add_trait" | "add_equipment" | "set_race" | "set_class" | "add_racial_trait"
-  label: string;       // display text
-  field: string;       // CharacterDraft key to update
-  value: string;       // value to set (scalar) or append (array field)
-  description: string; // one-sentence tooltip
-}
-
 export function apiStream(
   path: string,
   body: unknown,

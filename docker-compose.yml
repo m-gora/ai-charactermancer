@@ -111,8 +111,9 @@ services:
     volumes:
       # Bind-mount the whole frontend directory for HMR
       - ./frontend:/app
-      # Keep the container's node_modules; never let the host override it
-      - /app/node_modules
+      # Named volume keeps container's node_modules separate from the host bind-mount.
+      # If packages change, remove it with: docker volume rm ai-charactermancer_frontend_nm
+      - frontend_nm:/app/node_modules
     env_file:
       - path: ./frontend/.env
         required: false
@@ -154,3 +155,4 @@ services:
 volumes:
   mongo_data:
   mongo_config:
+  frontend_nm:
