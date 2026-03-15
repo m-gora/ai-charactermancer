@@ -9,17 +9,18 @@ Graph layout
       │
       ▼
     validation   Node 2 — pure-math prerequisite check (no LLM)
-      │
-      ▼
-    ui           Node 3 — stream narrative + generate A2UI surface messages
-      │
+     / \\
+    ▼   ▼
+  narr  a2ui     Nodes 3a/3b — run in parallel after validation
+     \\ /
       ▼
     END
 
 The FastAPI layer drives the graph via ``astream_events`` so that LLM token
-chunks emitted inside the *ui* node are forwarded to the browser in real time.
-The second LLM call in the ui node generates A2UI v0.8 messages that the
-@a2ui/react renderer on the frontend uses to display click-to-apply buttons.
+chunks emitted inside the *narrative_node* are forwarded to the browser in
+real time.  The *a2ui_node* runs concurrently and its structured-JSON result
+lands as soon as it finishes — typically while the narrative is still
+streaming — eliminating the sequential bottleneck.
 """
 
 from __future__ import annotations
@@ -155,6 +156,9 @@ def _build_context_section(validated_docs: list[dict[str, Any]]) -> str:
     return "Relevant game content:\n" + "\n\n---\n\n".join(parts)
 
 
+_FENCE_RE = re.compile(r"^```[a-z]*\n?|\n?```$", re.MULTILINE)
+
+
 # ---------------------------------------------------------------------------
 # Node 1 — RAG
 # ---------------------------------------------------------------------------
@@ -178,18 +182,14 @@ def validation_node(state: AgentState) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Node 3 — UI (narrative stream + A2UI surface generation)
+# Node 3a — Narrative (streaming)
 # ---------------------------------------------------------------------------
 
-_FENCE_RE = re.compile(r"^```[a-z]*\n?|\n?```$", re.MULTILINE)
 
-
-async def ui_node(state: AgentState) -> dict[str, Any]:
+async def narrative_node(state: AgentState) -> dict[str, Any]:
     """
-    Two LLM calls:
-      1. Streaming narrative — token events surfaced via astream_events.
-      2. A2UI v0.8 JSON generation — produces a ServerToClientMessage[] that
-         the frontend @a2ui/react renderer uses to display action buttons.
+    Stream the Markdown narrative reply.  Token events are surfaced via
+    astream_events and forwarded to the browser in real time.
     """
     context_section = _build_context_section(state["validated_docs"])
     system_prompt = _NARRATIVE_SYSTEM.format(
@@ -198,14 +198,12 @@ async def ui_node(state: AgentState) -> dict[str, Any]:
         context_section=context_section,
     )
 
-    # Build LangChain message list from history --------------------------------
     lc_messages: list = [SystemMessage(content=system_prompt)]
     for turn in state["history"]:
         cls = HumanMessage if turn["role"] == "user" else AIMessage
         lc_messages.append(cls(content=turn["content"]))
     lc_messages.append(HumanMessage(content=state["query"]))
 
-    # --- Call 1: streaming narrative (astream exposes token events) -----------
     narrative_llm = ChatGoogleGenerativeAI(
         model=settings.chat_model,
         google_api_key=settings.google_api_key,
@@ -216,7 +214,19 @@ async def ui_node(state: AgentState) -> dict[str, Any]:
         if chunk.content:
             full_text += chunk.content
 
-    # --- Call 2: A2UI surface generation (JSON mode, non-streaming) ----------
+    return {"response_text": full_text}
+
+
+# ---------------------------------------------------------------------------
+# Node 3b — A2UI surface generation (JSON, non-streaming)
+# ---------------------------------------------------------------------------
+
+
+async def a2ui_node(state: AgentState) -> dict[str, Any]:
+    """
+    Generate A2UI v0.8 surface messages for the eligible items.  Runs in
+    parallel with narrative_node — no dependency on the narrative text.
+    """
     eligible_items = [
         {
             "name": d["name"],
@@ -234,30 +244,32 @@ async def ui_node(state: AgentState) -> dict[str, Any]:
         if d.get("eligible", True) and _COLLECTION_FIELD.get(d["collection"])
     ]
 
-    a2ui_messages: list[dict[str, Any]] = []
-    if eligible_items:
-        a2ui_llm = ChatGoogleGenerativeAI(
-            model=settings.chat_model,
-            google_api_key=settings.google_api_key,
-            response_mime_type="application/json",
-        )
-        user_prompt = (
-            f"Eligible items (JSON):\n{json.dumps(eligible_items, indent=2)}\n\n"
-            f"Narrative already shown to user:\n{full_text[:800]}"
-        )
-        result = await a2ui_llm.ainvoke(
-            [SystemMessage(content=_A2UI_SYSTEM), HumanMessage(content=user_prompt)]
-        )
-        raw = result.content.strip() if isinstance(result.content, str) else ""
-        raw = _FENCE_RE.sub("", raw).strip()
-        try:
-            parsed = json.loads(raw)
-            if isinstance(parsed, list):
-                a2ui_messages = parsed
-        except json.JSONDecodeError:
-            pass  # degrade gracefully — no surface shown
+    if not eligible_items:
+        return {"a2ui_messages": []}
 
-    return {"response_text": full_text, "a2ui_messages": a2ui_messages}
+    a2ui_llm = ChatGoogleGenerativeAI(
+        model=settings.chat_model,
+        google_api_key=settings.google_api_key,
+        response_mime_type="application/json",
+    )
+    user_prompt = (
+        f"Step: {state['step']}\n\n"
+        f"User query: {state['query']}\n\n"
+        f"Eligible items (JSON):\n{json.dumps(eligible_items, indent=2)}"
+    )
+    result = await a2ui_llm.ainvoke(
+        [SystemMessage(content=_A2UI_SYSTEM), HumanMessage(content=user_prompt)]
+    )
+    raw = result.content.strip() if isinstance(result.content, str) else ""
+    raw = _FENCE_RE.sub("", raw).strip()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, list):
+            return {"a2ui_messages": parsed}
+    except json.JSONDecodeError:
+        pass  # degrade gracefully — no surface shown
+
+    return {"a2ui_messages": []}
 
 
 # ---------------------------------------------------------------------------
@@ -266,15 +278,19 @@ async def ui_node(state: AgentState) -> dict[str, Any]:
 
 
 def build_graph():
-    """Build and compile the 3-node LangGraph pipeline."""
+    """Build and compile the LangGraph pipeline with parallel narrative/a2ui nodes."""
     g = StateGraph(AgentState)
     g.add_node("rag", rag_node)
     g.add_node("validation", validation_node)
-    g.add_node("ui", ui_node)
+    g.add_node("narrative", narrative_node)
+    g.add_node("a2ui", a2ui_node)
     g.add_edge(START, "rag")
     g.add_edge("rag", "validation")
-    g.add_edge("validation", "ui")
-    g.add_edge("ui", END)
+    # Fan-out: both nodes start as soon as validation finishes
+    g.add_edge("validation", "narrative")
+    g.add_edge("validation", "a2ui")
+    # Fan-in: END is reached only after both nodes complete
+    g.add_edge(["narrative", "a2ui"], END)
     return g.compile()
 
 

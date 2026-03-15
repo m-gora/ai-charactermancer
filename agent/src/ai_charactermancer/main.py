@@ -123,8 +123,8 @@ async def _stream_response(
         kind: str = event["event"]
         node: str = event.get("metadata", {}).get("langgraph_node", "")
 
-        # Capture the run_id of the first LLM call inside the ui node.
-        if kind == "on_chat_model_start" and node == "ui" and narrative_run_id is None:
+        # Capture the run_id of the first LLM call inside the narrative node.
+        if kind == "on_chat_model_start" and node == "narrative" and narrative_run_id is None:
             narrative_run_id = event["run_id"]
 
         # Forward streaming narrative tokens.
@@ -134,8 +134,10 @@ async def _stream_response(
             if text:
                 yield f"data: {json.dumps(text)}\n\n"
 
-        # When the ui node finishes, emit A2UI messages as a typed SSE event.
-        elif kind == "on_chain_end" and event.get("name") == "ui" and not actions_emitted:
+        # When the a2ui node finishes, emit A2UI messages as a typed SSE event.
+        # This fires as soon as a2ui_node completes — potentially while narrative
+        # tokens are still streaming, eliminating the sequential lag.
+        elif kind == "on_chain_end" and event.get("name") == "a2ui" and not actions_emitted:
             actions_emitted = True
             output: dict = event["data"].get("output", {})
             a2ui_messages = output.get("a2ui_messages", [])

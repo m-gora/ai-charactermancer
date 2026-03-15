@@ -14,6 +14,7 @@ import {
   type Catalog,
 } from '@a2ui-sdk/react/0.8';
 import type { ChildrenDefinition, Action, ValueSource } from '@a2ui-sdk/types/0.8';
+import { useCharacterStore } from '../../store/characterStore';
 
 // A2UIComponentProps is not re-exported from the main index; define it locally
 type A2UIComponentProps<T = unknown> = T & { surfaceId: string; componentId: string; weight?: number };
@@ -114,12 +115,27 @@ const MuiButton = memo(function MuiButton({
   primary = false,
 }: A2UIComponentProps<{ child?: string; action?: Action; primary?: boolean }>) {
   const dispatch = useDispatchAction();
+  const { draft } = useCharacterStore();
   const handleClick = useCallback(() => {
     action && dispatch(surfaceId, componentId, action);
   }, [dispatch, surfaceId, componentId, action]);
 
-  // Detect "✓ Already on sheet" label via child text — rendered as disabled
-  const isOwned = !action;
+  // Check live draft state so the button flips to "Already on sheet" immediately
+  // after the user clicks, without waiting for a new server response.
+  let isOwned = !action;
+  if (!isOwned && action) {
+    const colonIdx = action.name.indexOf(':');
+    if (colonIdx !== -1) {
+      const field = action.name.slice(0, colonIdx);
+      const value = action.name.slice(colonIdx + 1);
+      const current = draft[field as keyof typeof draft];
+      if (Array.isArray(current)) {
+        isOwned = current.includes(value);
+      } else if (typeof current === 'string') {
+        isOwned = current === value;
+      }
+    }
+  }
 
   if (isOwned) {
     return (
