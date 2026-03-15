@@ -3,7 +3,6 @@ import {
   Typography,
   Button,
   Paper,
-  Divider,
   CircularProgress,
   Alert,
   Chip,
@@ -31,7 +30,7 @@ interface CharacterSummary {
  * resume an existing one or start a new wizard.
  */
 export function CharacterOverview() {
-  const { user, logout, getAccessTokenSilently } = useAuth0();
+  const { getAccessTokenSilently } = useAuth0();
   const navigate = useNavigate();
   const [characters, setCharacters] = useState<CharacterSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -63,25 +62,6 @@ export function CharacterOverview() {
         py: 4,
       }}
     >
-      {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-        <Box>
-          <Typography variant="h4" color="primary">AI Charactermancer</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Welcome back, {user?.name ?? user?.email ?? 'Adventurer'}
-          </Typography>
-        </Box>
-        <Button
-          variant="outlined"
-          size="small"
-          onClick={() => void logout({ logoutParams: { returnTo: location.origin } })}
-        >
-          Log out
-        </Button>
-      </Box>
-
-      <Divider sx={{ mb: 4 }} />
-
       {/* Character list */}
       <Box sx={{ flex: 1 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
