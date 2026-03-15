@@ -2,9 +2,9 @@ FROM oven/bun:1 AS dev
 
 WORKDIR /app
 
-# Install dependencies
-COPY package.json bunfig.toml* ./
-RUN bun install
+# Install dependencies (copy lockfile for reproducible installs)
+COPY package.json bun.lock* bunfig.toml* ./
+RUN bun install --frozen-lockfile
 
 # Copy source (node_modules excluded via .dockerignore)
 COPY . .

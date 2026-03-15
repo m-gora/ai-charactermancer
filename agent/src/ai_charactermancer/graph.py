@@ -11,24 +11,26 @@ Graph layout
     validation   Node 2 — pure-math prerequisite check (no LLM)
       │
       ▼
-    ui           Node 3 — stream narrative + extract structured UI actions
+    ui           Node 3 — stream narrative + generate A2UI surface messages
       │
       ▼
     END
 
 The FastAPI layer drives the graph via ``astream_events`` so that LLM token
 chunks emitted inside the *ui* node are forwarded to the browser in real time.
+The second LLM call in the ui node generates A2UI v0.8 messages that the
+@a2ui/react renderer on the frontend uses to display click-to-apply buttons.
 """
 
 from __future__ import annotations
 
 import json
-from typing import Any, Literal
+import re
+from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import END, START, StateGraph
-from pydantic import BaseModel
 from typing_extensions import TypedDict
 
 from .config import settings
@@ -55,33 +57,7 @@ class AgentState(TypedDict):
 
     # ── set by ui node ───────────────────────────────────────────────────────
     response_text: str
-    actions: list[dict[str, Any]]
-
-
-# ---------------------------------------------------------------------------
-# Structured-output schema (used by the UI node's action-extraction call)
-# ---------------------------------------------------------------------------
-
-
-class ActionItem(BaseModel):
-    """One click-to-apply recommendation for the character sheet."""
-
-    type: Literal[
-        "add_feat",
-        "add_trait",
-        "add_equipment",
-        "set_race",
-        "set_class",
-        "add_racial_trait",
-    ]
-    label: str          # display text shown on the chip / button
-    field: str          # CharacterDraft key to update
-    value: str          # value to set (scalar) or append (array fields)
-    description: str = ""   # one-sentence benefit summary for the tooltip
-
-
-class ActionsOutput(BaseModel):
-    actions: list[ActionItem]
+    a2ui_messages: list[dict[str, Any]]   # A2UI v0.8 ServerToClientMessage[]
 
 
 # ---------------------------------------------------------------------------
@@ -105,23 +81,54 @@ rules strictly:
 3. If no eligible options exist in the context, say so honestly rather than \
    inventing alternatives."""
 
-_ACTIONS_SYSTEM = """\
-Extract click-to-apply action buttons from a character-creation recommendation.
+# Collection name → CharacterDraft field
+_COLLECTION_FIELD: dict[str, str] = {
+    "feats": "feats",
+    "traits": "traits",
+    "items": "equipment",
+    "races": "race",
+    "classes": "class",
+    "racial_traits": "racialTraitOverrides",
+    # class_abilities are informational — no button
+}
 
-Action type mapping:
-  feats/feat abilities  → type="add_feat",        field="feats"
-  traits                → type="add_trait",       field="traits"
-  items / equipment     → type="add_equipment",   field="equipment"
-  races                 → type="set_race",        field="race"
-  classes               → type="set_class",       field="class"
-  racial trait overrides→ type="add_racial_trait",field="racialTraitOverrides"
+_A2UI_SYSTEM = """\
+Generate A2UI v0.8 JSON messages for a Pathfinder 1e sidekick recommendation panel.
+
+Return ONLY a raw JSON array — no markdown fences, no explanation, no extra text.
+
+SURFACE ID: "actions"  ROOT ID: "root"
+
+Button action encoding: "{field}:{item_name}"
+  feats            → feats
+  traits           → traits
+  items/equipment  → equipment
+  races            → race
+  classes          → class
+  racial_traits    → racialTraitOverrides
+  class_abilities  → SKIP (informational only, no button)
+
+REQUIRED OUTPUT STRUCTURE:
+[
+  { "surfaceUpdate": { "surfaceId": "actions", "components": [
+      { "id": "root",   "component": { "Column": { "children": { "explicitList": ["card-0", ...] } } } },
+      { "id": "card-0", "component": { "Card": { "child": "col-0" } } },
+      { "id": "col-0",  "component": { "Column": { "children": { "explicitList": ["title-0", "body-0", "btn-0"] } } } },
+      { "id": "title-0","component": { "Text": { "text": { "literalString": "ITEM NAME" }, "usageHint": "h3" } } },
+      { "id": "body-0", "component": { "Text": { "text": { "literalString": "One-sentence benefit." }, "usageHint": "body2" } } },
+      { "id": "btn-0",  "component": { "Button": { "child": "btnlbl-0", "action": {"name": "feats:ITEM NAME"} } } },
+      { "id": "btnlbl-0","component": { "Text": { "text": { "literalString": "Add to sheet" } } } }
+  ] } },
+  { "beginRendering": { "surfaceId": "actions", "root": "root" } }
+]
 
 Rules:
-• Only create actions for items **explicitly recommended** in the narrative.
-• Only include items that appear in the eligible list provided.
-• Skip anything the character already possesses.
-• label = value = the exact item name as it appears in the rules.
-• description: one sentence — what the item does for the character."""
+- One Card per eligible item (skip items already in the draft and class_abilities).
+- Increment the numeric suffix for each item: card-0, card-1 …
+- The "root" Column's explicitList must list every card-N id.
+- Keep body text under 120 characters.
+- Already-owned items: include Card but replace the Button with a Text that says "✓ Already on sheet".\
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -171,14 +178,18 @@ def validation_node(state: AgentState) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Node 3 — UI (narrative stream + structured action extraction)
+# Node 3 — UI (narrative stream + A2UI surface generation)
 # ---------------------------------------------------------------------------
+
+_FENCE_RE = re.compile(r"^```[a-z]*\n?|\n?```$", re.MULTILINE)
 
 
 async def ui_node(state: AgentState) -> dict[str, Any]:
     """
-    Stream a narrative response (LangGraph surfaces on_chat_model_stream events
-    to the FastAPI layer), then extract structured click-to-apply action items.
+    Two LLM calls:
+      1. Streaming narrative — token events surfaced via astream_events.
+      2. A2UI v0.8 JSON generation — produces a ServerToClientMessage[] that
+         the frontend @a2ui/react renderer uses to display action buttons.
     """
     context_section = _build_context_section(state["validated_docs"])
     system_prompt = _NARRATIVE_SYSTEM.format(
@@ -205,36 +216,48 @@ async def ui_node(state: AgentState) -> dict[str, Any]:
         if chunk.content:
             full_text += chunk.content
 
-    # --- Call 2: structured action extraction (non-streaming, fast) ----------
-    eligible_summaries = [
+    # --- Call 2: A2UI surface generation (JSON mode, non-streaming) ----------
+    eligible_items = [
         {
             "name": d["name"],
             "collection": d["collection"],
-            "summary": d.get("summary", ""),
+            "field": _COLLECTION_FIELD.get(d["collection"], ""),
+            "summary": (d.get("summary") or "")[:120],
+            "already_owned": d["name"] in (
+                state["draft"].get("feats", [])
+                + state["draft"].get("traits", [])
+                + state["draft"].get("equipment", [])
+                + state["draft"].get("racialTraitOverrides", [])
+            ),
         }
         for d in state["validated_docs"]
-        if d.get("eligible", True)
+        if d.get("eligible", True) and _COLLECTION_FIELD.get(d["collection"])
     ]
 
-    actions: list[dict[str, Any]] = []
-    if eligible_summaries:
-        action_llm = ChatGoogleGenerativeAI(
+    a2ui_messages: list[dict[str, Any]] = []
+    if eligible_items:
+        a2ui_llm = ChatGoogleGenerativeAI(
             model=settings.chat_model,
             google_api_key=settings.google_api_key,
+            response_mime_type="application/json",
         )
-        structured_llm = action_llm.with_structured_output(ActionsOutput)
-        extraction_prompt = (
-            f"Narrative:\n{full_text}\n\n"
-            f"Character draft:\n{json.dumps(state['draft'], indent=2)}\n\n"
-            f"Eligible items:\n{json.dumps(eligible_summaries, indent=2)}"
+        user_prompt = (
+            f"Eligible items (JSON):\n{json.dumps(eligible_items, indent=2)}\n\n"
+            f"Narrative already shown to user:\n{full_text[:800]}"
         )
-        result = await structured_llm.ainvoke(
-            [SystemMessage(content=_ACTIONS_SYSTEM), HumanMessage(content=extraction_prompt)]
+        result = await a2ui_llm.ainvoke(
+            [SystemMessage(content=_A2UI_SYSTEM), HumanMessage(content=user_prompt)]
         )
-        if result and hasattr(result, "actions"):
-            actions = [a.model_dump() for a in result.actions]
+        raw = result.content.strip() if isinstance(result.content, str) else ""
+        raw = _FENCE_RE.sub("", raw).strip()
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                a2ui_messages = parsed
+        except json.JSONDecodeError:
+            pass  # degrade gracefully — no surface shown
 
-    return {"response_text": full_text, "actions": actions}
+    return {"response_text": full_text, "a2ui_messages": a2ui_messages}
 
 
 # ---------------------------------------------------------------------------
@@ -264,3 +287,4 @@ def get_graph():
     if _compiled is None:
         _compiled = build_graph()
     return _compiled
+
