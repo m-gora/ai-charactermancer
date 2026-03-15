@@ -32,11 +32,20 @@ export async function apiFetch<T>(
 
 /**
  * Opens an SSE stream to `path` (POST with JSON body + Bearer token).
- * Calls `onChunk` for each SSE `data:` line, `onDone` when the stream closes,
- * and `onError` on any non-abort error.
+ * Calls `onChunk` for each text `data:` line, `onEvent` for typed events
+ * (e.g. `event: actions`), `onDone` when the stream closes, and `onError`
+ * on any non-abort error.
  *
  * Returns an abort function that cancels the stream.
  */
+export interface ActionItem {
+  type: string;        // "add_feat" | "add_trait" | "add_equipment" | "set_race" | "set_class" | "add_racial_trait"
+  label: string;       // display text
+  field: string;       // CharacterDraft key to update
+  value: string;       // value to set (scalar) or append (array field)
+  description: string; // one-sentence tooltip
+}
+
 export function apiStream(
   path: string,
   body: unknown,
@@ -44,6 +53,7 @@ export function apiStream(
   onChunk: (chunk: string) => void,
   onDone: () => void,
   onError: (err: Error) => void,
+  onEvent?: (eventType: string, data: string) => void,
 ): () => void {
   const controller = new AbortController();
 
@@ -72,18 +82,29 @@ export function apiStream(
         const { value, done } = await reader.read();
         if (done) break;
         const text = decoder.decode(value, { stream: true });
+
+        // Parse SSE lines.  Track the current event type; reset after blank line.
+        let currentEvent = 'message';
         for (const line of text.split('\n')) {
-          if (line.startsWith('data: ')) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith('data: ')) {
             const payload = line.slice(6);
             if (payload.trimEnd() === '[DONE]') {
               onDone();
               return;
             }
-            try {
-              onChunk(JSON.parse(payload));
-            } catch {
-              onChunk(payload);
+            if (currentEvent !== 'message') {
+              onEvent?.(currentEvent, payload);
+            } else {
+              try {
+                onChunk(JSON.parse(payload));
+              } catch {
+                onChunk(payload);
+              }
             }
+          } else if (line.trim() === '') {
+            currentEvent = 'message'; // SSE event boundary — reset type
           }
         }
       }

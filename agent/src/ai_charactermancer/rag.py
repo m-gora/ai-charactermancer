@@ -1,7 +1,9 @@
 """RAG helpers: retrieve relevant PF1e content from MongoDB using vector search."""
 
 import asyncio
+import re
 from functools import lru_cache
+from typing import Any
 
 import pymongo
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
@@ -56,8 +58,6 @@ def _embed_query(query: str) -> list[float]:
     return _embeddings().embed_query(query)
 
 
-import re
-
 _UUID_RE = re.compile(r'@UUID\[[^\]]+\]\{([^}]+)\}')
 _PREREQ_RE = re.compile(r'Prerequisites?\s*:\s*([^.]+\.)', re.IGNORECASE)
 _BENEFIT_RE = re.compile(r'Benefits?\s*:\s*', re.IGNORECASE)
@@ -78,9 +78,6 @@ def _format_doc(doc) -> str:
     m = doc.metadata
     name = m.get('name', '')
     summary = _clean(m.get('summary', ''))
-    # prerequisite_names is only populated when the source YAML uses @UUID links.
-    # prerequisite_text is set by the parser (plain-text extraction).
-    # Fall back to parsing the description on the fly for legacy docs.
     prereq_names = m.get('prerequisite_names') or []
     description = _clean(m.get('description', ''))
     prereq_text = (
@@ -89,7 +86,6 @@ def _format_doc(doc) -> str:
         or _extract_prereqs(description)
     )
 
-    # Show everything before "Benefit" as the benefit summary (up to 300 chars)
     benefit_match = _BENEFIT_RE.search(description)
     benefit_text = description[benefit_match.end():][:300] if benefit_match else description[:300]
 
@@ -103,44 +99,69 @@ def _format_doc(doc) -> str:
     return '\n'.join(parts)
 
 
-def _search_collection(
+def _doc_to_dict(doc, collection_name: str) -> dict[str, Any]:
+    """Convert a LangChain Document to a plain dict consumed by the graph nodes."""
+    m = doc.metadata
+    prereq_names: list[str] = m.get('prerequisite_names') or []
+    description = _clean(m.get('description', ''))
+    prereq_text = (
+        m.get('prerequisite_text', '')
+        or ', '.join(prereq_names)
+        or _extract_prereqs(description)
+    )
+    return {
+        "name": m.get('name', ''),
+        "collection": collection_name,
+        "summary": _clean(m.get('summary', '')),
+        "prerequisite_names": prereq_names,
+        "prerequisite_text": prereq_text,
+        "description": description,
+        "formatted": _format_doc(doc),
+    }
+
+
+def _search_collection_docs(
     collection_name: str, vector: list[float], k: int
-) -> list[str]:
-    """Search one collection by pre-computed vector — no extra embedding call."""
+) -> list[dict[str, Any]]:
+    """Search one collection and return structured doc dicts."""
     try:
-        docs = _vector_store(collection_name).similarity_search_by_vector(
-            vector, k=k
-        )
-        return [_format_doc(doc) for doc in docs]
+        docs = _vector_store(collection_name).similarity_search_by_vector(vector, k=k)
+        return [_doc_to_dict(doc, collection_name) for doc in docs]
     except Exception:
         return []
 
 
-async def retrieve_context(query: str, step: str, k: int = 4) -> str:
+async def retrieve_docs(query: str, step: str, k: int = 4) -> list[dict[str, Any]]:
     """
-    Embed the query once, then search all relevant collections in parallel.
-    Returns a formatted context string, or empty string when not needed.
+    Embed the query once, search all relevant collections in parallel, and
+    return a list of structured doc dicts (used by the validation & UI nodes).
     """
     collections = _STEP_COLLECTIONS.get(step, _FALLBACK_COLLECTIONS)
     if not collections:
-        return ""
+        return []
 
     loop = asyncio.get_event_loop()
-
-    # Single embedding call shared across all collections
     vector = await loop.run_in_executor(None, _embed_query, query)
 
     results = await asyncio.gather(
         *[
-            loop.run_in_executor(None, _search_collection, col, vector, k)
+            loop.run_in_executor(None, _search_collection_docs, col, vector, k)
             for col in collections
         ],
         return_exceptions=True,
     )
 
-    chunks: list[str] = []
+    docs: list[dict[str, Any]] = []
     for result in results:
         if isinstance(result, list):
-            chunks.extend(result)
+            docs.extend(result)
+    return docs
 
-    return "\n\n---\n\n".join(chunks)
+
+async def retrieve_context(query: str, step: str, k: int = 4) -> str:
+    """
+    Convenience wrapper that returns a formatted context string.
+    Kept for backward-compatibility; the graph nodes use retrieve_docs directly.
+    """
+    docs = await retrieve_docs(query, step, k)
+    return "\n\n---\n\n".join(d["formatted"] for d in docs)

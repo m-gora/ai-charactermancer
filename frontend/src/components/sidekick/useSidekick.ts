@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react';
 import { useAuth0 } from '@auth0/auth0-react';
-import { apiStream } from '../../api/client';
+import { apiStream, type ActionItem } from '../../api/client';
 import { type CharacterDraft } from '../../store/characterStore';
 import { type Message } from './ChatMessage';
 
@@ -77,6 +77,20 @@ export function useSidekick({ draft, step }: UseSidekickOptions): UseSidekickRet
             setError(err.message);
             setStreaming(false);
             abortRef.current = null;
+          },
+          (eventType, data) => {
+            if (eventType === 'actions') {
+              try {
+                const actions: ActionItem[] = JSON.parse(data);
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantId ? { ...m, actions } : m,
+                  ),
+                );
+              } catch {
+                // malformed JSON — ignore
+              }
+            }
           },
         );
 

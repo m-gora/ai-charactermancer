@@ -22,8 +22,14 @@ services:
   # ── MongoDB (Atlas Local — includes Atlas Vector Search) ─────────────────
   # mongodb/mongodb-atlas-local is a drop-in replacement for the community
   # image that bundles mongot so $vectorSearch works out of the box.
+  #
+  # hostname: mongo  ← critical: makes the container's own hostname the stable
+  # DNS name "mongo" so Atlas Local always writes "mongo:27017" into the replica
+  # set config.  Without this, the node ID stored in the volume is a random
+  # container hash that changes on every recreate → RSGhost / no primary.
   mongo:
     image: mongodb/mongodb-atlas-local:latest
+    hostname: mongo
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -31,11 +37,13 @@ services:
       - mongo_data:/data/db
       - mongo_config:/data/configdb
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand('hello').isWritablePrimary ? 0 : 1)"]
+      interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 24
+      start_period: 20s
 
+  # ── Replica-set initialiser (one-shot) ─────────────────────────────────────
   # ── Character CRUD backend ─────────────────────────────────────────────────
   backend:
     build:
@@ -53,8 +61,9 @@ services:
       - path: ./backend/.env
         required: false
     environment:
-      # Override the MONGODB_URI from .env to point at the compose mongo service
-      MONGODB_URI: "mongodb://mongo:27017"
+      # directConnection=true: connect directly to the single node without
+      # replica-set topology discovery (avoids "no primary" races on startup).
+      MONGODB_URI: "mongodb://mongo:27017/?directConnection=true"
       MONGODB_DB: "charactermancer"
       CORS_ORIGINS: "http://localhost:5173"
       PYTHONPATH: /app/src
@@ -79,7 +88,7 @@ services:
       - path: ./agent/.env
         required: false
     environment:
-      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_URI: "mongodb://mongo:27017/?directConnection=true"
       MONGODB_DB: "charactermancer"
       CORS_ORIGINS: "http://localhost:5173"
       AUTH0_DOMAIN: "${AUTH0_DOMAIN}"
@@ -133,7 +142,7 @@ services:
       - path: ./ingestion/.env
         required: false
     environment:
-      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_URI: "mongodb://mongo:27017/?directConnection=true"
       MONGODB_DB: "charactermancer"
       FOUNDRY_DATA_PATH: "/data/foundryvtt-pathfinder1/packs"
       PF1_CONTENT_PATH: "/data/pf1-content/src"

@@ -1,6 +1,5 @@
-"""AI Sidekick — FastAPI app that streams Gemini responses with RAG context."""
+"""AI Sidekick — FastAPI app that streams Gemini responses via LangGraph."""
 
-import asyncio
 import json
 from collections.abc import AsyncGenerator
 
@@ -8,13 +7,12 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from google import genai
 from jose import JWTError, jwt
 import httpx
 
 from .config import settings
+from .graph import AgentState, get_graph
 from .models import SidekickRequest, HistoryMessage
-from .rag import retrieve_context
 
 load_dotenv()
 
@@ -81,29 +79,10 @@ async def verify_token(authorization: str | None = None) -> str:
         raise _401
 
 
+
 # ---------------------------------------------------------------------------
-# System prompt
+# Streaming response — drives the LangGraph pipeline
 # ---------------------------------------------------------------------------
-
-_SYSTEM_PROMPT = """You are an AI sidekick in a Pathfinder 1e character creation wizard. \
-You help the player make informed decisions at the current step: {step}.
-
-The player's character so far:
-{draft}
-
-{context_block}
-Answer concisely and helpfully using Markdown formatting (bold key terms, bullet lists for \
-options, short paragraphs).
-
-CRITICAL RULES — you MUST follow these without exception:
-1. **Only reference content that appears verbatim in the "Relevant rules" block above.** \
-Never invent feat names, trait names, spell names, prerequisites, or mechanical effects. \
-If a feat or rule is not in the retrieved context, do not mention it.
-2. **Before recommending any feat or ability, explicitly verify every listed prerequisite \
-against the character draft.** If the character does not satisfy a prerequisite (e.g. \
-required skill ranks, BAB, another feat, or ability score), do not recommend that option.
-3. If the retrieved context does not contain enough feats the character qualifies for, \
-say so honestly rather than inventing alternatives."""
 
 
 async def _stream_response(
@@ -112,39 +91,57 @@ async def _stream_response(
     step: str,
     history: list[HistoryMessage],
 ) -> AsyncGenerator[str, None]:
-    feat_step_k = 10 if step == "feats" else 4
-    context = await retrieve_context(message, step, k=feat_step_k)
-    context_block = (
-        f"Relevant rules and game content:\n{context}" if context else ""
-    )
-    system_prompt = _SYSTEM_PROMPT.format(
+    """
+    Run the 3-node LangGraph pipeline and stream results as Server-Sent Events.
+
+    SSE protocol:
+      data: "<text chunk>"          — narrative token (streamed in real-time)
+      event: actions
+      data: [{"type":…, …}, …]      — click-to-apply action items (emitted once)
+      data: [DONE]                  — stream closed
+    """
+    initial_state = AgentState(
+        query=message,
+        draft=draft,
         step=step,
-        draft=json.dumps(draft, indent=2),
-        context_block=context_block,
+        history=[{"role": h.role, "content": h.content} for h in history],
+        retrieved_docs=[],
+        validated_docs=[],
+        response_text="",
+        actions=[],
     )
 
-    # Build multi-turn contents: system instruction + prior turns + new message
-    from google.genai import types
-    contents = []
-    for turn in history:
-        role = "user" if turn.role == "user" else "model"
-        contents.append(types.Content(role=role, parts=[types.Part(text=turn.content)]))
-    contents.append(types.Content(role="user", parts=[types.Part(text=message)]))
+    graph = get_graph()
 
-    client = genai.Client(api_key=settings.google_api_key)
-    loop = asyncio.get_event_loop()
+    # run_id of the first chat-model call inside the ui node (the streaming
+    # narrative).  We track it so we don't accidentally forward tokens from
+    # the second, non-streaming structured-output call.
+    narrative_run_id: str | None = None
+    actions_emitted = False
 
-    def _generate():
-        return client.models.generate_content_stream(
-            model=settings.chat_model,
-            contents=contents,
-            config=types.GenerateContentConfig(system_instruction=system_prompt),
-        )
+    async for event in graph.astream_events(initial_state, version="v2"):
+        kind: str = event["event"]
+        node: str = event.get("metadata", {}).get("langgraph_node", "")
 
-    stream = await loop.run_in_executor(None, _generate)
-    for chunk in stream:
-        if chunk.text:
-            yield f"data: {json.dumps(chunk.text)}\n\n"
+        # Capture the run_id of the first LLM call inside the ui node.
+        if kind == "on_chat_model_start" and node == "ui" and narrative_run_id is None:
+            narrative_run_id = event["run_id"]
+
+        # Forward streaming narrative tokens.
+        elif kind == "on_chat_model_stream" and event["run_id"] == narrative_run_id:
+            chunk = event["data"]["chunk"]
+            text = chunk.content if isinstance(chunk.content, str) else ""
+            if text:
+                yield f"data: {json.dumps(text)}\n\n"
+
+        # When the ui node finishes, emit actions as a typed SSE event.
+        elif kind == "on_chain_end" and event.get("name") == "ui" and not actions_emitted:
+            actions_emitted = True
+            output: dict = event["data"].get("output", {})
+            actions = output.get("actions", [])
+            if actions:
+                yield f"event: actions\ndata: {json.dumps(actions)}\n\n"
+
     yield "data: [DONE]\n\n"
 
 
